@@ -14,6 +14,7 @@
   const TABS = [['rolls', '🎲', 'Броски'], ['me', '◆', 'Я'], ['board', '📌', 'Заказы'], ['fight', '⚔', 'Бой'], ['team', '👥', 'Отряд'], ['event', '🎃', 'Ивент'], ['journal', '📜', 'Журнал']];
   const S = { user: null, prof: null, game: {}, heroes: {}, rolls: [], tab: store.get('ek_tab', 'rolls'), sound: store.get('ek_sound', true), err: '', fresh: null, myTurnSeen: null };
   if (!window.supabase) { app.innerHTML = '<div class="boot">Не загрузилась библиотека связи. Проверь интернет и обнови страницу.</div>'; return; }
+  const INV = (() => { try { return (new URLSearchParams(location.search).get('code') || '').trim().toUpperCase().slice(0, 12); } catch (e) { return ''; } })();
   const sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, storageKey: 'ek_auth' } });
 
   // ---------- мелочи ----------
@@ -34,7 +35,7 @@
   // ---------- вход ----------
   async function start() {
     const { data } = await sb.auth.getSession();
-    if (data && data.session) await afterLogin(data.session.user); else renderAuth();
+    if (data && data.session) await afterLogin(data.session.user); else renderAuth(INV ? 'up' : 'in');
     sb.auth.onAuthStateChange((ev, sess) => { if (ev === 'SIGNED_OUT') { S.user = null; S.prof = null; renderAuth(); } });
   }
   async function afterLogin(user) {
@@ -57,21 +58,23 @@
       <div class="logo"><div class="mark">◈</div><h1>Экосистема</h1><p>Отряд у края Бездны</p></div>
       <div class="seg"><button data-m="in" class="${mode === 'in' ? 'on' : ''}">Вход</button><button data-m="up" class="${mode === 'up' ? 'on' : ''}">Регистрация</button></div>
       <form class="card form">
-        ${mode === 'up' ? '<label>Имя (как тебя знает отряд)<input name="name" required maxlength="30" autocomplete="nickname"></label>' : ''}
-        <label>Почта<input name="email" type="email" required autocomplete="username"></label>
+        ${mode === 'up' ? `<label>Код отряда (его даёт Мастер)<input name="code" required maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" value="${esc((S.f && S.f.code) || INV)}" style="text-transform:uppercase;letter-spacing:.2em;font-weight:700"></label><label>Имя (как тебя знает отряд)<input name="name" required maxlength="30" autocomplete="nickname" value="${esc((S.f && S.f.name) || '')}"></label>` : ''}
+        <label>Почта<input name="email" type="email" required autocomplete="username" value="${esc((S.f && S.f.email) || '')}"></label>
         <label>Пароль<input name="pw" type="password" required minlength="6" autocomplete="${mode === 'up' ? 'new-password' : 'current-password'}"></label>
         <button class="btn primary" type="submit">${mode === 'up' ? 'Зарегистрироваться' : 'Войти'}</button>
         <p class="err">${esc(S.err)}</p>
       </form>
-      <p class="hint">После регистрации Мастер привяжет твой аккаунт к твоему герою.</p>
+      <p class="hint">${mode === 'up' ? 'Код отряда — у Мастера. После регистрации он привяжет тебя к твоему герою.' : 'Первый раз здесь? Открой «Регистрация».'}</p>
     </div>`;
     app.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => { S.err = ''; renderAuth(b.dataset.m); }));
     app.querySelector('form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const f = new FormData(e.target), email = String(f.get('email')).trim(), pw = String(f.get('pw'));
       const btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = '…';
-      const r = mode === 'up' ? await sb.auth.signUp({ email, password: pw, options: { data: { name: String(f.get('name') || '').trim() } } }) : await sb.auth.signInWithPassword({ email, password: pw });
-      if (r.error) { S.err = r.error.message === 'Invalid login credentials' ? 'Неверная почта или пароль.' : r.error.message; return renderAuth(mode); }
+      const code = String(f.get('code') || '').trim().toUpperCase();
+      S.f = { code, email, name: String(f.get('name') || '').trim() };
+      const r = mode === 'up' ? await sb.auth.signUp({ email, password: pw, options: { data: { name: String(f.get('name') || '').trim(), code } } }) : await sb.auth.signInWithPassword({ email, password: pw });
+      if (r.error) { const m = r.error.message || ''; S.err = m === 'Invalid login credentials' ? 'Неверная почта или пароль.' : /database error|saving new user|EK_BAD_CODE/i.test(m) ? 'Неверный код отряда (или Мастер закрыл набор). Спроси код у Мастера.' : /already registered|already exists/i.test(m) ? 'Эта почта уже зарегистрирована — просто войди.' : m; return renderAuth(mode); }
       if (!r.data.session) { S.err = 'Аккаунт создан. Попробуй войти.'; return renderAuth('in'); }
       S.err = ''; afterLogin(r.data.user);
     });
