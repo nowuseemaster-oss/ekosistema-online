@@ -229,6 +229,7 @@
     const snd = app.querySelector('#snd'); if (snd) snd.addEventListener('change', () => { S.sound = snd.checked; store.set('ek_sound', S.sound); if (S.sound) beep(660, 0.2); });
     const out = app.querySelector('#out'); if (out) out.addEventListener('click', () => sb.auth.signOut());
     const fxo = app.querySelector('#fxo'); if (fxo) fxo.addEventListener('change', () => window.EkTheme && window.EkTheme.fx(fxo.checked));
+    app.querySelectorAll('.qn[data-q]').forEach((b) => b.addEventListener('click', () => openNote(b.dataset.q, b)));
     app.querySelectorAll('[data-sk]').forEach((b) => b.addEventListener('click', async () => {
       const id = b.dataset.sk; if (id === (S.heroes[me] || {}).skin || S.busy) return;
       if (!gmOn()) return ask('skin', { id });
@@ -308,17 +309,69 @@
     return `<h3>Особые результаты <small>${rare.length}${tot ? ' из ' + tot : ''}</small></h3>
       <div class="sps">${base.concat(rare).map((x) => `<div class="spc ${x.base ? 'base' : ''} ${x.id === '1' ? 'bad' : ''}"><i>${esc(x.ic)}</i><b>${esc(x.t)}</b><em>×${x.n}</em></div>`).join('')}${Array.from({ length: Math.min(locked, 6) }, () => '<div class="spc lock"><i>?</i><b>???</b></div>').join('')}${locked > 6 ? `<div class="spc lock more">и ещё ${locked - 6} — пока тайна</div>` : ''}</div>`;
   }
-  function qCard(q, taken) {
-    const left = q.due ? Math.ceil((q.due - ((S.game.clock && S.game.clock.t) || Date.now())) / 86400000) : null, w = WH[Math.min(7, q.wh || 0)];
-    return `<div class="card quest ${q.res ? q.res : ''}"><div class="qh"><b>${esc(q.title)}</b><span class="rew">${money(q.reward)}</span></div><p>${esc(q.text)}</p>
-      <div class="qm"><span>${'◆'.repeat(Math.max(1, q.diff || 1))}</span><span>слой ${q.layer || 0}</span><span class="wh" style="--wc:${w[2]}"><i></i>от ${w[0].toLowerCase()}</span>${q.qty ? `<span>${q.got || 0}/${q.qty}</span>` : ''}${taken && left != null ? `<span class="${left < 1 ? 'late' : ''}">${left < 1 ? 'срок вышел' : 'осталось ' + left + ' дн.'}</span>` : ''}${q.days && !taken ? `<span>${q.days} дн.</span>` : ''}</div>
-      ${q.team && q.team.length ? `<div class="qt">${q.team.map((k) => `<span style="--hc:${heroCol(k)}"><i></i>${esc(heroName(k))}</span>`).join('')}</div>` : ''}</div>`;
+  // ---------- доска заказов: листочки на пробковой доске ----------
+  const DIFFN = ['', 'Лёгкий', 'Средний', 'Сложный', 'Смертельный'], DIFFI = ['', '◇', '◈', '◆', '☠'];
+  const hash = (s) => { let x = 7; for (const ch of String(s || '')) x = (x * 31 + ch.charCodeAt(0)) >>> 0; return x; };
+  const QS = {};   // заказы по id — для раскрытия листочка
+  const daysLeft = (q) => (q.due ? Math.ceil((q.due - ((S.game.clock && S.game.clock.t) || Date.now())) / 86400000) : null);
+  function qNote(q, mode) {
+    QS[q.id] = { q, mode };
+    const r = hash(q.id), rot = ((r % 70) / 10 - 3.5).toFixed(1), w = WH[Math.min(7, q.wh || 0)], pin = ['#e0645a', '#e8c547', '#5ab0e0', '#7ad08a', '#c38cff'][r % 5];
+    const me = myHero(), mine = (q.team || []).includes(me), left = daysLeft(q);
+    const stamp = q.res === 'done' ? '<em class="stamp ok">выполнен</em>' : q.res === 'fail' ? '<em class="stamp bad">провален</em>' : mode === 'taken' ? `<em class="stamp take">${mine ? 'мой' : 'взят'}</em>` : '';
+    return `<button class="qn ${mode} ${q.res || ''} ${mine ? 'mine' : ''}" data-q="${esc(q.id)}" style="--rot:${rot}deg;--wc:${w[2]};--pin:${pin}">
+      <i class="pin"></i><i class="rib" title="${esc(w[0])} свисток"></i>
+      <b>${esc(q.title)}</b>
+      <span class="qn-m"><span>${DIFFI[q.diff || 1] || '◇'} ${esc(DIFFN[q.diff || 1] || '')}</span>${money(q.reward)}</span>
+      ${mode === 'taken' && left != null && !q.res ? `<small class="${left < 1 ? 'late' : ''}">${left < 1 ? 'срок вышел' : 'осталось ' + left + ' дн.'}</small>` : ''}
+      ${stamp}</button>`;
   }
   function vBoard() {
-    const B = S.game.board; if (!B) return '<div class="empty">Доска заказов пока пуста.</div>';
-    return `${B.taken && B.taken.length ? `<h3>Взятые заказы</h3>${B.taken.map((q) => qCard(q, true)).join('')}` : ''}
-      <h3>Доска заказов</h3>${B.board && B.board.length ? B.board.map((q) => qCard(q, false)).join('') : '<div class="empty sm">Новых заказов нет.</div>'}
-      ${B.archive && B.archive.length ? `<h3>Недавно закрытые</h3>${B.archive.slice(0, 6).map((q) => qCard(q, false)).join('')}` : ''}`;
+    const B = S.game.board || {}, me = myHero();
+    const taken = (B.taken || []).slice().sort((a, b) => ((b.team || []).includes(me) ? 1 : 0) - ((a.team || []).includes(me) ? 1 : 0));
+    const takenHtml = taken.length ? `<div class="cork small"><div class="cork-in">${taken.map((q) => qNote(q, 'taken')).join('')}</div></div>` : '<div class="empty sm">Отряд пока не взял ни одного заказа.</div>';
+    const board = B.open
+      ? `<div class="cork"><div class="cork-h">Доска заказов гильдии</div><div class="cork-in">${(B.board || []).length ? B.board.map((q) => qNote(q, 'board')).join('') : '<p class="cork-empty">Сегодня на доске пусто.</p>'}</div></div>
+         ${(B.archive || []).length ? `<h3>Недавно закрытые</h3><div class="cork small dim"><div class="cork-in">${B.archive.slice(0, 6).map((q) => qNote(q, 'arch')).join('')}</div></div>` : ''}`
+      : `<div class="cork shut"><div class="cork-in"><div class="shut-msg"><b>Доска закрыта</b><span>Новые заказы появятся здесь, когда Мастер подойдёт к доске.</span></div></div></div>`;
+    return `<h3>Взятые заказы <small>${taken.filter((q) => (q.team || []).includes(me)).length} моих</small></h3>${takenHtml}
+      <h3>Доска заказов ${B.open ? '<small class="live-tag">● Мастер у доски</small>' : ''}</h3>${board}`;
+  }
+  // листочек приближается с доски и раскрывается
+  function openNote(id, from) {
+    const it = QS[id]; if (!it || document.querySelector('.qz')) return;
+    const q = it.q, w = WH[Math.min(7, q.wh || 0)], left = daysLeft(q), me = myHero();
+    const ov = document.createElement('div'); ov.className = 'qz';
+    ov.innerHTML = `<div class="qz-bg"></div><article class="qz-card" style="--wc:${w[2]}">
+      <i class="pin"></i><i class="rib"><span>${esc(w[0])}</span></i><button class="qz-x" aria-label="Закрыть">✕</button>
+      <div class="qz-body">
+        <small class="qz-k">${esc(q.kind || 'Заказ')}${q.client ? ' · ' + esc(q.client) : ''}</small>
+        <h2>${esc(q.title)}</h2>
+        ${q.text ? `<p class="qz-t">${esc(q.text)}</p>` : ''}
+        <dl>
+          <div><dt>Награда</dt><dd>${money(q.res === 'done' && q.paid ? q.paid : q.reward)}</dd></div>
+          <div><dt>Сложность</dt><dd>${DIFFI[q.diff || 1]} ${esc(DIFFN[q.diff || 1])}</dd></div>
+          <div><dt>Где</dt><dd>${esc(q.ln || 'Слой ' + (q.layer || 0))}</dd></div>
+          <div><dt>Допуск</dt><dd><i class="dot" style="background:${w[2]}"></i>${esc(w[0])} свисток</dd></div>
+          ${q.item && (q.item.name || q.qty) ? `<div><dt>Добыча</dt><dd>${esc(q.item.name || q.item.type || '—')}${q.qty ? ' · ' + (it.mode === 'taken' ? (q.got || 0) + ' из ' : '') + q.qty : ''}</dd></div>` : ''}
+          <div><dt>Срок</dt><dd>${it.mode === 'taken' && left != null ? (left < 1 ? '<span class="late">срок вышел</span>' : 'осталось ' + left + ' дн.') : q.days ? q.days + ' дн. с момента, как возьмёте' : 'без срока'}</dd></div>
+        </dl>
+        ${q.team && q.team.length ? `<div class="qt">${q.team.map((k) => `<span style="--hc:${heroCol(k)}"><i></i>${esc(heroName(k))}${k === me ? ' (ты)' : ''}</span>`).join('')}</div>` : ''}
+        ${q.res === 'done' ? '<em class="stamp ok big">выполнен</em>' : q.res === 'fail' ? '<em class="stamp bad big">провален</em>' : it.mode === 'taken' ? '<em class="stamp take big">взят отрядом</em>' : '<p class="qz-hint">Хотите взять — скажите Мастеру.</p>'}
+      </div></article>`;
+    document.body.appendChild(ov);
+    const card = ov.querySelector('.qz-card'), r0 = from.getBoundingClientRect(), r1 = card.getBoundingClientRect();
+    const sx = r0.width / r1.width, sy = r0.height / r1.height, dx = r0.left + r0.width / 2 - (r1.left + r1.width / 2), dy = r0.top + r0.height / 2 - (r1.top + r1.height / 2);
+    const rot = getComputedStyle(from).getPropertyValue('--rot') || '0deg';
+    card.animate([{ transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy}) rotate(${rot})`, opacity: 0.9 }, { transform: 'translate(0,0) scale(1.04) rotate(0.6deg)', opacity: 1, offset: 0.7 }, { transform: 'none', opacity: 1 }], { duration: 520, easing: 'cubic-bezier(.2,.8,.25,1)' });
+    ov.querySelector('.qz-bg').animate([{ opacity: 0 }, { opacity: 1 }], { duration: 400, fill: 'both' });
+    from.style.visibility = 'hidden'; beep(420, 0.08, 0.03); buzz(15);
+    const close = () => {
+      const a = card.animate([{ transform: 'none', opacity: 1 }, { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy}) rotate(${rot})`, opacity: 0.6 }], { duration: 380, easing: 'cubic-bezier(.5,0,.75,0)' });
+      ov.querySelector('.qz-bg').animate([{ opacity: 1 }, { opacity: 0 }], { duration: 380, fill: 'both' });
+      a.onfinish = () => { ov.remove(); from.style.visibility = ''; };
+    };
+    ov.querySelector('.qz-bg').addEventListener('click', close); ov.querySelector('.qz-x').addEventListener('click', close);
   }
   function vFight() {
     const F = S.game.fight, me = myHero();
