@@ -123,7 +123,7 @@
     if (ch) return;
     ch = sb.channel('game')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'game_state' }, (p) => { if (p.new && p.new.key) { const old = S.game[p.new.key]; S.game[p.new.key] = p.new.data; if (p.new.key === 'fight') checkTurn(old); if (p.new.key === 'pk') pkSync(); soft(); } })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'hero_state' }, (p) => { if (p.new && p.new.hero) { const old = S.heroes[p.new.hero]; S.heroes[p.new.hero] = p.new.data; if (p.new.hero === myHero()) { hpFx(old && old.hp, p.new.data && p.new.data.hp); if (S.skWant && p.new.data && p.new.data.skin === S.skWant) { S.skWant = null; busy(null); } } soft(); } })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hero_state' }, (p) => { if (p.new && p.new.hero) { const old = S.heroes[p.new.hero]; S.heroes[p.new.hero] = p.new.data; if (p.new.hero === myHero()) { hpFx(old && old.hp, p.new.data && p.new.data.hp); if (S.skWant && p.new.data && p.new.data.skin === S.skWant) S.skWant = null; } soft(); } })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'actions' }, (p) => { if (p.new && p.new.hero === myHero() && p.new.applied) onResult(p.new); })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'rolls' }, (p) => { if (p.new) { S.rolls.unshift(p.new); S.rolls = S.rolls.slice(0, 60); S.fresh = p.new.id; onRoll(p.new); soft(); } })
       .subscribe((st) => { S.live = st === 'SUBSCRIBED'; paintLive(); });
@@ -237,8 +237,21 @@
   function skinTheme(id) {
     if (!window.EkTheme || !id) return;
     const T = window.EkTheme;
-    if (skinSeen && skinSeen !== id) { const t = document.createElement('div'); t.className = 'skin-toast'; t.innerHTML = '<small>новый облик</small>' + esc(T.name(id)); document.body.appendChild(t); setTimeout(() => t.remove(), 3400); buzz(30); }
-    skinSeen = id; T.set(id);
+    const first = !skinSeen, was = skinSeen; skinSeen = id;
+    if (first || was === id) { T.set(id); return; }
+    // смена облика — всегда через экран загрузки: и когда меняет сам игрок, и когда Мастер
+    const mine = !!S.busy;
+    if (!mine) { busy('Меняем облик…', 'Мастер сменил облик твоего кубика'); const im = document.querySelector('#busy img'); if (im) im.src = dimg(was); }
+    setTimeout(() => skinReveal(id), mine ? 350 : 1300);
+  }
+  function skinReveal(id) {
+    const T = window.EkTheme, el = document.getElementById('busy');
+    if (!el) { T.set(id); return; }
+    busy('Облик «' + T.name(id) + '»', 'Готово — кубик и экран в новой атмосфере');
+    el.classList.add('done'); const img = el.querySelector('img'); img.src = dimg(id);
+    T.set(id); buzz([30, 40, 30]); beep(660, 0.15, 0.05); setTimeout(() => beep(990, 0.25, 0.05), 120);
+    setTimeout(() => { const q = img.getBoundingClientRect(); T.burst(q.left + q.width / 2, q.top + q.height / 2, { n: 40, power: 340, ring: 2 }); }, 120);
+    setTimeout(() => { el.classList.remove('done'); busy(null); soft(); }, 1400);
   }
 
   const rollCls = (r) => (r.kind === 'crit' ? 'crit' : r.kind === 'fail' ? 'fail' : r.kind === 'special' ? 'special' : '');

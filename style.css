@@ -237,3 +237,7 @@ body.shake #app { animation: shake .45s; }
 @keyframes bspin { 0% { transform: rotate(0) scale(1); } 50% { transform: rotate(180deg) scale(.88); } 100% { transform: rotate(360deg) scale(1); } }
 @keyframes bring { to { transform: rotate(360deg); } } @keyframes bdot { 0%, 100% { opacity: .25; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-5px); } }
 @keyframes bin { from { opacity: 0; } } @keyframes bout { to { opacity: 0; } }
+#busy.done .bdie img { animation: bswap .9s cubic-bezier(.2, 1.3, .4, 1) both; } #busy.done .bdie i, #busy.done .bdots { opacity: 0; transition: opacity .2s; }
+#busy.done b { animation: bpop .5s ease both; }
+@keyframes bswap { 0% { transform: rotate(-200deg) scale(.3); filter: brightness(2.5) blur(3px); } 60% { transform: rotate(10deg) scale(1.15); filter: brightness(1.3); } 100% { transform: none; } }
+@keyframes bpop { 0% { opacity: 0; transform: translateY(6px); } 100% { opacity: 1; transform: none; } }
