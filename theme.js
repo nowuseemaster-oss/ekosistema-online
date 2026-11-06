@@ -223,6 +223,30 @@
     c.clearRect(0, 0, W, H);
     if (bg) c.drawImage(bg, 0, 0, W, H);
     for (const l of layers) { if (dt && l.step) l.step(dt); l.draw(); }
+    drawBursts(dt || 0);
+  }
+  // ---------- вспышка частиц (бросок, тыква) ----------
+  const bursts = [], rings = [];
+  function burst(x, y, o) {
+    if (!on || reduce || !cur) return; o = o || {};
+    const cols = o.cols || [cur[1], cur[2], '#ffffff'], n = o.n || 28, pw = o.power || 320;
+    for (let i = 0; i < n; i++) { const an = rnd(0, TAU), v = rnd(pw * 0.25, pw); bursts.push({ x, y, vx: Math.cos(an) * v, vy: Math.sin(an) * v - pw * 0.15, life: 0, max: rnd(0.6, 1.3), s: rnd(1.5, 4.5), col: pick(cols), star: Math.random() < 0.45 }); }
+    if (o.ring !== false) rings.push({ x, y, t: 0, col: cols[0], w: o.ring === 2 ? 2 : 1 });
+    while (bursts.length > 400) bursts.shift();
+  }
+  function drawBursts(dt) {
+    for (let i = bursts.length - 1; i >= 0; i--) {
+      const b = bursts[i]; b.life += dt; if (b.life > b.max) { bursts.splice(i, 1); continue; }
+      b.vy += 220 * dt; b.vx *= 0.97; b.vy *= 0.97; b.x += b.vx * dt; b.y += b.vy * dt;
+      c.globalAlpha = 1 - b.life / b.max;
+      if (b.star) shape({ shape: 'star4' }, { x: b.x, y: b.y, s: b.s * 1.8, col: b.col });
+      else { const g = glowSprite(b.col); c.drawImage(g, b.x - b.s * 3, b.y - b.s * 3, b.s * 6, b.s * 6); }
+    }
+    for (let i = rings.length - 1; i >= 0; i--) {
+      const r = rings[i]; r.t += dt; if (r.t > 0.9) { rings.splice(i, 1); continue; }
+      c.globalAlpha = (1 - r.t / 0.9) * 0.8; c.strokeStyle = r.col; c.lineWidth = 3 * r.w * (1 - r.t); c.beginPath(); c.arc(r.x, r.y, 30 + r.t * 260 * r.w, 0, TAU); c.stroke();
+    }
+    c.globalAlpha = 1;
   }
   function palette(id) {
     const t = T[id] || T.classic, s = document.documentElement.style;
@@ -248,7 +272,7 @@
   }
   addEventListener('resize', () => { if (cur) { size(); if (!run) draw(0); } });
   window.EkTheme = {
-    set, list: T, name: (id) => (T[id] || T.classic)[0],
+    set, burst, list: T, name: (id) => (T[id] || T.classic)[0], accent: () => (cur ? [cur[1], cur[2]] : ['#d9b26a', '#7fd1c7']),
     fx(v) { on = !!v; try { localStorage.setItem('ek_fx', on ? '1' : '0'); } catch (e) {} run = false; start(); },
     get fxOn() { return on; }
   };
