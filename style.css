@@ -308,3 +308,4 @@ body.shake #app { animation: shake .45s; }
 .qz-card .qt { margin-top: 12px; } .qz-card .qt span { color: #2a1a0c; }
 .qz-hint { margin: 14px 0 0; font: 600 18px Caveat, cursive; color: #6a4a28; }
 .qn.taken, .qn.arch { padding-bottom: 36px; }
+.qz-fr { display: block; margin-top: 2px; font: 600 11px Inter, sans-serif; color: #9a5a30; }
