@@ -51,7 +51,18 @@
     S.busy = txt; if (document.activeElement) document.activeElement.blur();
     S.busyT = setTimeout(() => { if (S.busy) { busy(null); S.skWant = null; note('Экосистема Мастера не ответила — попробуй ещё раз', 'bad'); soft(); } }, 20000);
   }
-  const hpBar = (P, big) => { if (!P || !P.max) return ''; const p = Math.max(0, Math.min(1, P.hp / P.max)); return `<div class="hpb ${big ? 'big' : ''} ${p <= 0.25 ? 'low' : p <= 0.5 ? 'mid' : ''} ${P.hp <= 0 ? 'down' : ''}"><div class="hpt"><span>${P.hp <= 0 ? '☠ без сознания' : '❤ Здоровье'}</span><b>${P.hp}<small> / ${P.max}</small></b></div><div class="hpl"><i style="width:${(p * 100).toFixed(1)}%"></i></div></div>`; };
+  const WHC = ['#9aa0a6', '#3fc7c0', '#3c7be0', '#5b4bd1', '#9b4fd6', '#e86aa6', '#d8323f', '#7a0f18'];
+  const xpBar = (Q, big) => { if (!Q) return ''; const p = Q.max ? 100 : Q.into / Q.need * 100; return `<div class="xpb ${big ? 'lg' : ''}" style="--wc:${WHC[Q.wh] || '#9aa0a6'}"><div class="xpt"><span><i></i>${esc(Q.rank)} · <b>${Q.lv}</b> ур.</span><small>${Q.max ? 'максимальный уровень' : Q.into + ' / ' + Q.need + ' ОГ'}</small></div><div class="xpl"><i style="width:${p.toFixed(1)}%"></i></div></div>`; };
+  // новый уровень — праздник на весь экран
+  function lvFx(a, b) {
+    if (!a || !b || b.lv <= a.lv) return;
+    const el = document.createElement('div'); el.className = 'lvfx' + (b.rank !== a.rank ? ' rank' : ''); el.style.setProperty('--wc', WHC[b.wh] || '#d9b26a');
+    el.innerHTML = `<div><small>${b.rank !== a.rank ? 'новый ранг · ' + esc(b.rank) : 'опыт гильдии'}</small><b>${b.lv}</b><em>уровень</em></div>`;
+    document.body.appendChild(el); setTimeout(() => el.remove(), 3400);
+    beep(523, 0.18, 0.06); setTimeout(() => beep(659, 0.18, 0.06), 140); setTimeout(() => beep(784, 0.18, 0.06), 280); setTimeout(() => beep(1046, 0.5, 0.07), 420); buzz([60, 40, 60, 40, 120]);
+    if (window.EkTheme) { const cx = innerWidth / 2, cy = innerHeight * 0.42; window.EkTheme.burst(cx, cy, { cols: [WHC[b.wh] || '#d9b26a', '#ffffff', '#f5cd6a'], n: 70, power: 520, ring: 2 }); setTimeout(() => window.EkTheme.burst(cx, cy, { n: 40, power: 380, ring: 2 }), 450); }
+  }
+  const hpBar = (P, big) => { if (!P || !P.max) return ''; const p = Math.max(0, Math.min(1, P.hp / P.max)); return `<div class="hpb ${big ? 'lg' : ''} ${p <= 0.25 ? 'low' : p <= 0.5 ? 'mid' : ''} ${P.hp <= 0 ? 'down' : ''}"><div class="hpt"><span>${P.hp <= 0 ? '☠ без сознания' : '❤ Здоровье'}</span><b>${P.hp}<small> / ${P.max}</small></b></div><div class="hpl"><i style="width:${(p * 100).toFixed(1)}%"></i></div></div>`; };
   let actx = null;
   function beep(f, d, v) { if (!S.sound) return; try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); const o = actx.createOscillator(), g = actx.createGain(); o.frequency.value = f; o.type = 'triangle'; g.gain.value = v || 0.06; o.connect(g); g.connect(actx.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + (d || 0.25)); o.stop(actx.currentTime + (d || 0.25) + 0.02); } catch (e) {} }
   const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
@@ -123,7 +134,7 @@
     if (ch) return;
     ch = sb.channel('game')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'game_state' }, (p) => { if (p.new && p.new.key) { const old = S.game[p.new.key]; S.game[p.new.key] = p.new.data; if (p.new.key === 'fight') checkTurn(old); if (p.new.key === 'pk') pkSync(); soft(); } })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'hero_state' }, (p) => { if (p.new && p.new.hero) { const old = S.heroes[p.new.hero]; S.heroes[p.new.hero] = p.new.data; if (p.new.hero === myHero()) { hpFx(old && old.hp, p.new.data && p.new.data.hp); if (S.skWant && p.new.data && p.new.data.skin === S.skWant) S.skWant = null; } soft(); } })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hero_state' }, (p) => { if (p.new && p.new.hero) { const old = S.heroes[p.new.hero]; S.heroes[p.new.hero] = p.new.data; if (p.new.hero === myHero()) { hpFx(old && old.hp, p.new.data && p.new.data.hp); lvFx(old && old.xp, p.new.data && p.new.data.xp); if (S.skWant && p.new.data && p.new.data.skin === S.skWant) S.skWant = null; } soft(); } })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'actions' }, (p) => { if (p.new && p.new.hero === myHero() && p.new.applied) onResult(p.new); })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'rolls' }, (p) => { if (p.new) { S.rolls.unshift(p.new); S.rolls = S.rolls.slice(0, 60); S.fresh = p.new.id; onRoll(p.new); soft(); } })
       .subscribe((st) => { S.live = st === 'SUBSCRIBED'; paintLive(); });
@@ -202,7 +213,7 @@
     skinTheme(H.skin);
     const gmOff = S.game.gm && S.game.gm.on === false;
     const head = `<header class="top" style="--hc:${heroCol(me)}">
-      <div class="who"><i class="dot"></i><div><b>${esc(me ? heroName(me) : S.prof.role === 'gm' ? 'Мастер' : '')}</b><small>${esc((S.game.team && S.game.team.party) || 'Отряд')}${S.game.clock ? ' · ' + esc(S.game.clock.time) + ' · день ' + esc(S.game.clock.day) : ''}</small></div></div>
+      <div class="who"><i class="dot"></i><div><b>${esc(me ? heroName(me) : S.prof.role === 'gm' ? 'Мастер' : '')}</b><small>${me && H.xp ? 'ур. ' + H.xp.lv + ' · ' + esc(H.xp.rank) : esc((S.game.team && S.game.team.party) || 'Отряд')}${S.game.clock ? ' · ' + esc(S.game.clock.time) + ' · день ' + esc(S.game.clock.day) : ''}</small></div></div>
       <div class="bal">${me ? money(H.wallet) : ''}<span class="bal2">${me && H.hp && H.hp.max ? `<span class="hpm ${H.hp.hp / H.hp.max <= 0.25 ? 'low' : ''}">❤ ${H.hp.hp}/${H.hp.max}</span>` : ''}${me && S.game.hw && S.game.hw.live ? `<span class="candy">🍬 ${H.candy || 0}</span>` : ''}</span></div>
       <span class="live ${S.live && !gmOff ? 'on' : ''}" title="${gmOff ? 'Мастер не в сети' : 'Связь с Экосистемой Мастера'}"></span>
     </header>
@@ -276,7 +287,7 @@
     const me = myHero(); if (!me) return '<div class="empty">Ты не привязан к герою.</div>';
     const H = S.heroes[me] || {}, w = WH[Math.min(7, H.whistle || 0)], items = itemsOf(H), bf = bufText(H.buf, H.prank), hw = S.game.hw && S.game.hw.live;
     return `<div class="card hero" style="--hc:${heroCol(me)}"><div class="hrow"><div><h2>${esc(H.name || heroName(me))}</h2><span class="wh" style="--wc:${w[2]}"><i></i>${w[0]} свисток · ${w[1]}</span></div></div>
-      ${hpBar(H.hp, true)}
+      ${xpBar(H.xp, true)}${hpBar(H.hp, true)}
       <div class="stats"><div><small>Кошелёк</small>${money(H.wallet)}</div>${hw ? `<div><small>Конфеты</small><b>🍬 ${H.candy || 0}</b></div>` : ''}${H.stats ? `<div><small>Бросков</small><b>${H.stats.rolls}</b></div><div><small>Двадцаток</small><b>${H.stats.n20}</b></div><div><small>Единиц</small><b>${H.stats.n1}</b></div><div><small>Средний</small><b>${H.stats.avg || '—'}</b></div>` : ''}</div></div>
       ${bf.length ? `<div class="card buffs"><small>Действует сейчас</small><p>${bf.map(esc).join(' · ')}</p></div>` : ''}
       ${items.length ? `<h3>Инвентарь</h3><div class="grid">${items.map((x) => `<div class="card it r${x.d.r || 1}"><i>${esc(x.d.ic)}</i><div><b>${esc(x.d.n)}${x.n > 1 ? ' ×' + x.n : ''}</b><p>${esc(x.d.d)}</p></div></div>`).join('')}</div>` : hw ? '<h3>Инвентарь</h3><div class="empty sm">Пусто. Загляни к Тыквенному торговцу.</div>' : ''}
@@ -318,7 +329,7 @@
   }
   function vTeam() {
     const T = S.game.team || {};
-    return `<h3>${esc(T.party || 'Отряд')}${T.rest === 'long' ? ' <small>☀ долгий отдых — аптечка лечит вдвое</small>' : ''}</h3>${HEROES.map((k) => { const H = S.heroes[k] || {}, w = WH[Math.min(7, H.whistle || 0)]; return `<div class="card hero sm" style="--hc:${heroCol(k)}"><div class="hrow"><div><h2>${esc(H.name || heroName(k))}</h2><span class="wh" style="--wc:${w[2]}"><i></i>${w[0]} · ${w[1]}</span></div><div class="right">${money(H.wallet)}${S.game.hw && S.game.hw.live ? `<small>🍬 ${H.candy || 0}</small>` : ''}</div></div>${hpBar(H.hp)}</div>`; }).join('')}
+    return `<h3>${esc(T.party || 'Отряд')}${T.rest === 'long' ? ' <small>☀ долгий отдых — аптечка лечит вдвое</small>' : ''}</h3>${HEROES.map((k) => { const H = S.heroes[k] || {}, w = WH[Math.min(7, H.whistle || 0)]; return `<div class="card hero sm" style="--hc:${heroCol(k)}"><div class="hrow"><div><h2>${esc(H.name || heroName(k))}</h2><span class="wh" style="--wc:${w[2]}"><i></i>${w[0]} · ${w[1]}</span></div><div class="right">${money(H.wallet)}${S.game.hw && S.game.hw.live ? `<small>🍬 ${H.candy || 0}</small>` : ''}</div></div>${xpBar(H.xp)}${hpBar(H.hp)}</div>`; }).join('')}
       ${S.game.board && S.game.board.fund ? `<div class="card"><small>Общий фонд</small> ${money(S.game.board.fund)}</div>` : ''}`;
   }
   function vEvent() {
