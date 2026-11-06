@@ -11,7 +11,7 @@
   const HEROES = ['p0', 'p1', 'p2'];
   const WH = [['Серый', '0', '#9aa0a6'], ['Бирюзовый', 'I', '#3fc7c0'], ['Синий', 'II', '#3c7be0'], ['Индиго', 'III', '#5b4bd1'], ['Фиолетовый', 'IV', '#9b4fd6'], ['Розовый', 'V', '#e86aa6'], ['Красный', 'VI', '#d8323f'], ['Красно-чёрный', 'VII', '#7a0f18']];
   const RAR = ['', 'обычный', 'редкий', 'эпический', 'легендарный', 'мифический'];
-  const TABS = [['rolls', '🎲', 'Броски'], ['me', '◆', 'Я'], ['board', '📌', 'Заказы'], ['fight', '⚔', 'Бой'], ['team', '👥', 'Отряд'], ['event', '🎃', 'Ивент'], ['journal', '📜', 'Журнал']];
+  const TABS = [['rolls', '🎲', 'Броски'], ['me', '◆', 'Я'], ['bag', '🎒', 'Вещи'], ['board', '📌', 'Заказы'], ['fight', '⚔', 'Бой'], ['team', '👥', 'Отряд'], ['event', '🎃', 'Ивент'], ['journal', '📜', 'Журнал']];
   const S = { user: null, prof: null, game: {}, heroes: {}, rolls: [], tab: store.get('ek_tab', 'rolls'), sound: store.get('ek_sound', true), err: '', fresh: null, myTurnSeen: null };
   if (!window.supabase) { app.innerHTML = '<div class="boot">Не загрузилась библиотека связи. Проверь интернет и обнови страницу.</div>'; return; }
   const INV = (() => { try { return (new URLSearchParams(location.search).get('code') || '').trim().toUpperCase().slice(0, 12); } catch (e) { return ''; } })();
@@ -159,6 +159,7 @@
   function onResult(a) {
     const r = a.result || {};
     if (a.kind === 'skin') { if (!r.ok) { S.skWant = null; busy(null); note('Облик не сменился: ' + (r.why || 'неизвестно'), 'bad'); } else { clearTimeout(S.busyT); S.busyT = setTimeout(() => { S.skWant = null; busy(null); soft(); }, 5000); } soft(); }
+    if (a.kind === 'inv') { busy(null); note(r.ok ? 'Готово ✓' : 'Не вышло: ' + (r.why || 'неизвестно'), r.ok ? 'good' : 'bad'); }
     if (a.kind === 'pumpkin') { busy(null); if (r.ok) { note('🎃 +' + r.n + ' 🍬 — тыква поймана!', 'good'); beep(880, 0.2); setTimeout(() => beep(1320, 0.3), 120); buzz([40, 30, 40]); } else note('Тыква: ' + (r.why || 'не засчитана'), 'bad'); }
   }
   // ---------- тыквы на экране ----------
@@ -222,13 +223,14 @@
     const tabs = TABS.filter(([id]) => id !== 'event' || (S.game.hw && S.game.hw.live));
     if (!tabs.find(([id]) => id === S.tab)) S.tab = 'rolls';
     const nav = `<nav class="tabs">${tabs.map(([id, ic, t]) => `<button data-t="${id}" class="${S.tab === id ? 'on' : ''}"><i>${ic}</i><span>${t}</span>${id === 'fight' && myTurn ? '<em></em>' : ''}</button>`).join('')}</nav>`;
-    const body = ({ rolls: vRolls, me: vMe, board: vBoard, fight: vFight, team: vTeam, event: vEvent, journal: vJournal }[S.tab] || vRolls)();
+    const body = ({ rolls: vRolls, me: vMe, bag: vBag, board: vBoard, fight: vFight, team: vTeam, event: vEvent, journal: vJournal }[S.tab] || vRolls)();
     const y = window.scrollY;
     app.innerHTML = head + `<main class="pane">${body}</main>` + nav;
     app.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => { S.tab = b.dataset.t; store.set('ek_tab', S.tab); window.scrollTo(0, 0); render(); }));
     const snd = app.querySelector('#snd'); if (snd) snd.addEventListener('change', () => { S.sound = snd.checked; store.set('ek_sound', S.sound); if (S.sound) beep(660, 0.2); });
     const out = app.querySelector('#out'); if (out) out.addEventListener('click', () => sb.auth.signOut());
     const fxo = app.querySelector('#fxo'); if (fxo) fxo.addEventListener('change', () => window.EkTheme && window.EkTheme.fx(fxo.checked));
+    app.querySelectorAll('.bi[data-bi]').forEach((b) => b.addEventListener('click', () => openItem(b.dataset.bi)));
     app.querySelectorAll('.qn[data-q]').forEach((b) => b.addEventListener('click', () => openNote(b.dataset.q, b)));
     app.querySelectorAll('[data-sk]').forEach((b) => b.addEventListener('click', async () => {
       const id = b.dataset.sk; if (id === (S.heroes[me] || {}).skin || S.busy) return;
@@ -398,6 +400,46 @@
       <h3>Общий котёл · ${E.pot.n} 🍬</h3><div class="bar"><i style="width:${Math.min(100, E.pot.n / lastT * 100).toFixed(1)}%"></i></div>
       <ul class="thr">${pt.map(([n, t]) => `<li class="${E.pot.got.includes(n) ? 'got' : ''}"><b>${n}</b><span>${esc(t)}</span></li>`).join('')}<li class="${E.pot.box ? 'got' : ''}"><b>+${E.boxStep}</b><span>потом — Ящик Тонкой Грани каждому${E.pot.box ? ' (выдано: ' + E.pot.box + ')' : ''}</span></li></ul>
       ${T ? `<h3>Мои задания на сегодня</h3><ul class="tasks">${T}</ul>` : ''}`;
+  }
+  // ---------- вещи: при себе, рюкзаки, сундук ----------
+  const fW = (v) => String(Math.round((+v || 0) * 100) / 100).replace('.', ',') + ' фнт';
+  const ATKN = { melee: '⚔ ближняя', arrow: '🏹 стрелы', bolt: '🎯 болты', dart: '🗡️ дротики' };
+  const BI = {};
+  function bItem(s, where) {
+    BI[where + '|' + s.id] = { s, where };
+    const p = s.U ? Math.max(0, Math.min(1, s.left / s.U)) : 0;
+    return `<button class="bi ${where === 'chest' ? 'locked' : ''}" data-bi="${esc(where + '|' + s.id)}"><i>${esc(s.icon || '❓')}</i><b>${esc(s.name)}</b>${s.n > 1 ? `<span class="bx">×${s.n}</span>` : ''}<small>${s.U ? s.left + '/' + s.U + ' исп.' : ''}${s.U && s.U && s.n > 1 ? ' · всего ' + s.t : ''}</small><em>${fW(s.wt)}</em>${s.U ? `<span class="bu"><u style="width:${(p * 100).toFixed(0)}%"></u></span>` : ''}</button>`;
+  }
+  function vBag() {
+    const me = myHero(), H = S.heroes[me] || {}, B = H.bag;
+    if (!B || (!B.items.length && !B.packs.length && !B.chest.length)) return '<div class="empty">Сумка пуста. Вещи появятся, когда Мастер их выдаст.</div>';
+    const over = B.cap && B.w > B.cap, pc = B.cap ? Math.min(100, B.w / B.cap * 100) : 0;
+    return `<div class="card bag-top ${over ? 'over' : ''}"><div><small>Несу на себе</small><b>${fW(B.w)}</b>${B.cap ? `<span> из ${fW(B.cap)}</span>` : ''}</div><div class="bag-atk"><small>Атака</small><b>${ATKN[B.atk] || ATKN.melee}</b></div>${B.cap ? `<div class="bag-bar"><i style="width:${pc.toFixed(1)}%"></i></div>` : ''}</div>
+      <h3>При себе <small>считается в весе</small></h3><div class="bgrid">${B.items.length ? B.items.map((x) => bItem(x, 'inv')).join('') : '<p class="note">Ничего в руках.</p>'}</div>
+      ${B.packs.map((p) => `<div class="pack"><div class="pack-h"><i>${esc(p.icon)}</i><div><b>${esc(p.name)}</b><small>внутри ${fW(p.load)} из ${fW(p.cap)} · сам весит ${fW(p.w)}</small></div></div><div class="bag-bar"><i style="width:${p.cap ? Math.min(100, p.load / p.cap * 100).toFixed(1) : 0}%"></i></div><div class="bgrid">${p.items.length ? p.items.map((x) => bItem(x, 'pack:' + p.id)).join('') : '<p class="note">Пусто.</p>'}</div></div>`).join('')}
+      <h3>🧰 Сундук <small>не в весе · пользоваться нельзя</small></h3><div class="bgrid chest">${B.chest.length ? B.chest.map((x) => bItem(x, 'chest')).join('') : '<p class="note">Сундук пуст.</p>'}</div>
+      <p class="note">Нажми на вещь, чтобы переложить её или потратить использование. Рюкзак весит только сам — то, что внутри, в вес не идёт.</p>`;
+  }
+  function openItem(key) {
+    const it = BI[key]; if (!it || document.querySelector('.isheet')) return;
+    const { s, where } = it, B = (S.heroes[myHero()] || {}).bag || { packs: [] }, one = s.n > 1;
+    const unitW = s.n ? s.wt / s.n : s.w;
+    const dests = [['inv', '↩ Взять в руки']].concat(B.packs.map((p) => ['pack:' + p.id, p.icon + ' В «' + p.name + '»', Math.max(0, p.cap - p.load)]), [['chest', '🧰 В сундук']]).filter(([w]) => w !== where);
+    const usable = where !== 'chest' && (s.U || s.role);
+    const ov = document.createElement('div'); ov.className = 'isheet';
+    ov.innerHTML = `<div class="is-bg"></div><div class="is-card"><div class="is-h"><i>${esc(s.icon)}</i><div><b>${esc(s.name)}${s.n > 1 ? ' ×' + s.n : ''}</b><small>${fW(s.wt)}${s.U ? ' · ' + s.left + '/' + s.U + ' использований' + (s.n > 1 ? ' (всего ' + s.t + ')' : '') : ''}${where === 'chest' ? ' · в сундуке' : ''}</small></div><button class="is-x" aria-label="Закрыть">✕</button></div>
+      ${s.desc ? `<p class="is-d">${esc(s.desc)}</p>` : ''}
+      ${one ? '<div class="seg is-seg"><button data-one="1" class="on">Одну</button><button data-one="0">Все</button></div>' : ''}
+      <div class="is-acts">${dests.map(([w, t, free]) => `<button class="btn" data-to="${esc(w)}" ${free != null && unitW > free + 1e-9 ? 'disabled' : ''}>${esc(t)}${free != null ? ` <small>свободно ${fW(free)}</small>` : ''}</button>`).join('')}
+      ${usable ? '<button class="btn primary" data-use="1">Использовать (−1)</button>' : ''}</div>
+      ${where === 'chest' ? '<p class="note">Из сундука пользоваться нельзя — сначала достань.</p>' : ''}</div>`;
+    document.body.appendChild(ov);
+    let oneOn = true;
+    ov.querySelectorAll('[data-one]').forEach((b) => b.addEventListener('click', () => { oneOn = b.dataset.one === '1'; ov.querySelectorAll('[data-one]').forEach((x) => x.classList.toggle('on', x === b)); }));
+    const close = () => { ov.classList.add('out'); setTimeout(() => ov.remove(), 220); };
+    ov.querySelector('.is-bg').addEventListener('click', close); ov.querySelector('.is-x').addEventListener('click', close);
+    ov.querySelectorAll('[data-to]').forEach((b) => b.addEventListener('click', async () => { if (S.busy) return; close(); busy('Перекладываем «' + s.name + '»', 'Экосистема Мастера перекладывает вещь — пару секунд'); if (!(await ask('inv', { op: 'move', from: where, id: s.id, to: b.dataset.to, one: one && oneOn }))) busy(null); }));
+    const u = ov.querySelector('[data-use]'); if (u) u.addEventListener('click', async () => { if (S.busy) return; close(); busy('Используем «' + s.name + '»', 'Экосистема Мастера списывает одно использование'); if (!(await ask('inv', { op: 'use', from: where, id: s.id }))) busy(null); });
   }
   function vJournal() {
     const J = (S.game.journal && S.game.journal.list) || [];
