@@ -41,6 +41,16 @@
     return `<div class="d20 ${cls || ''}" style="--s:${img}px"><img src="${dimg(sk)}" alt="" onerror="this.onerror=null;this.src='dice/classic.webp'"><b style="font-size:${fs}px">${esc(t)}</b></div>`;
   }
   function note(txt, cls) { const t = document.createElement('div'); t.className = 'ptoast ' + (cls || ''); t.textContent = txt; document.body.appendChild(t); setTimeout(() => t.remove(), 3600); }
+  // экран ожидания: пока Экосистема Мастера выполняет просьбу, остальное заблокировано
+  function busy(txt, sub) {
+    let el = document.getElementById('busy'); clearTimeout(S.busyT);
+    if (!txt) { S.busy = null; if (el) { el.classList.add('out'); setTimeout(() => el.remove(), 260); } return; }
+    if (!el) { el = document.createElement('div'); el.id = 'busy'; el.setAttribute('role', 'alert'); el.setAttribute('aria-busy', 'true'); el.innerHTML = '<div class="bx"><div class="bdie"><img alt=""><i></i></div><b></b><small></small><div class="bdots"><i></i><i></i><i></i></div></div>'; ['click', 'touchstart', 'pointerdown', 'keydown'].forEach((ev) => el.addEventListener(ev, (e) => { e.stopPropagation(); e.preventDefault(); }, { passive: false })); document.body.appendChild(el); }
+    el.querySelector('img').src = dimg((S.heroes[myHero()] || {}).skin || 'classic');
+    el.querySelector('b').textContent = txt; el.querySelector('small').textContent = sub || 'Экосистема Мастера обрабатывает просьбу — пару секунд';
+    S.busy = txt; if (document.activeElement) document.activeElement.blur();
+    S.busyT = setTimeout(() => { if (S.busy) { busy(null); S.skWant = null; note('Экосистема Мастера не ответила — попробуй ещё раз', 'bad'); soft(); } }, 20000);
+  }
   const hpBar = (P, big) => { if (!P || !P.max) return ''; const p = Math.max(0, Math.min(1, P.hp / P.max)); return `<div class="hpb ${big ? 'big' : ''} ${p <= 0.25 ? 'low' : p <= 0.5 ? 'mid' : ''} ${P.hp <= 0 ? 'down' : ''}"><div class="hpt"><span>${P.hp <= 0 ? '☠ без сознания' : '❤ Здоровье'}</span><b>${P.hp}<small> / ${P.max}</small></b></div><div class="hpl"><i style="width:${(p * 100).toFixed(1)}%"></i></div></div>`; };
   let actx = null;
   function beep(f, d, v) { if (!S.sound) return; try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); const o = actx.createOscillator(), g = actx.createGain(); o.frequency.value = f; o.type = 'triangle'; g.gain.value = v || 0.06; o.connect(g); g.connect(actx.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + (d || 0.25)); o.stop(actx.currentTime + (d || 0.25) + 0.02); } catch (e) {} }
@@ -113,7 +123,7 @@
     if (ch) return;
     ch = sb.channel('game')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'game_state' }, (p) => { if (p.new && p.new.key) { const old = S.game[p.new.key]; S.game[p.new.key] = p.new.data; if (p.new.key === 'fight') checkTurn(old); if (p.new.key === 'pk') pkSync(); soft(); } })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'hero_state' }, (p) => { if (p.new && p.new.hero) { const old = S.heroes[p.new.hero]; S.heroes[p.new.hero] = p.new.data; if (p.new.hero === myHero()) hpFx(old && old.hp, p.new.data && p.new.data.hp); soft(); } })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hero_state' }, (p) => { if (p.new && p.new.hero) { const old = S.heroes[p.new.hero]; S.heroes[p.new.hero] = p.new.data; if (p.new.hero === myHero()) { hpFx(old && old.hp, p.new.data && p.new.data.hp); if (S.skWant && p.new.data && p.new.data.skin === S.skWant) { S.skWant = null; busy(null); } } soft(); } })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'actions' }, (p) => { if (p.new && p.new.hero === myHero() && p.new.applied) onResult(p.new); })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'rolls' }, (p) => { if (p.new) { S.rolls.unshift(p.new); S.rolls = S.rolls.slice(0, 60); S.fresh = p.new.id; onRoll(p.new); soft(); } })
       .subscribe((st) => { S.live = st === 'SUBSCRIBED'; paintLive(); });
@@ -137,8 +147,8 @@
   }
   function onResult(a) {
     const r = a.result || {};
-    if (a.kind === 'skin') { S.skPend = null; clearTimeout(S.skT); if (!r.ok) note('Облик не сменился: ' + (r.why || 'неизвестно'), 'bad'); soft(); }
-    if (a.kind === 'pumpkin') { if (r.ok) { note('🎃 +' + r.n + ' 🍬 — тыква поймана!', 'good'); beep(880, 0.2); setTimeout(() => beep(1320, 0.3), 120); buzz([40, 30, 40]); } else note('Тыква: ' + (r.why || 'не засчитана'), 'bad'); }
+    if (a.kind === 'skin') { if (!r.ok) { S.skWant = null; busy(null); note('Облик не сменился: ' + (r.why || 'неизвестно'), 'bad'); } else { clearTimeout(S.busyT); S.busyT = setTimeout(() => { S.skWant = null; busy(null); soft(); }, 5000); } soft(); }
+    if (a.kind === 'pumpkin') { busy(null); if (r.ok) { note('🎃 +' + r.n + ' 🍬 — тыква поймана!', 'good'); beep(880, 0.2); setTimeout(() => beep(1320, 0.3), 120); buzz([40, 30, 40]); } else note('Тыква: ' + (r.why || 'не засчитана'), 'bad'); }
   }
   // ---------- тыквы на экране ----------
   const PKdone = new Set(store.get('ek_pk', [])), PKel = {};
@@ -162,10 +172,11 @@
       requestAnimationFrame(step);
     })(t0);
     el.addEventListener('click', async () => {
-      if (!alive) return; gone(); el.classList.add('got');
+      if (!alive || S.busy) return; gone(); el.classList.add('got');
       if (window.EkTheme) window.EkTheme.burst(x, y, { cols: ['#ffb347', '#ffe27a', '#ff8a1e'], n: 36, power: 360, ring: 2 });
       beep(990, 0.12, 0.06); buzz(40); setTimeout(() => el.remove(), 500);
-      if (await ask('pumpkin', { id: p.id })) note('🎃 Поймана! Мастер считает конфеты…');
+      if (S.busy) return; busy('🎃 Тыква поймана!', 'Мастер считает конфеты…');
+      if (!(await ask('pumpkin', { id: p.id }))) busy(null);
     });
   }
   function onRoll(r) {
@@ -208,8 +219,10 @@
     const out = app.querySelector('#out'); if (out) out.addEventListener('click', () => sb.auth.signOut());
     const fxo = app.querySelector('#fxo'); if (fxo) fxo.addEventListener('change', () => window.EkTheme && window.EkTheme.fx(fxo.checked));
     app.querySelectorAll('[data-sk]').forEach((b) => b.addEventListener('click', async () => {
-      const id = b.dataset.sk; if (id === (S.heroes[me] || {}).skin || S.skPend) return;
-      if (await ask('skin', { id })) { S.skPend = id; clearTimeout(S.skT); S.skT = setTimeout(() => { if (S.skPend) { S.skPend = null; note('Экосистема Мастера не ответила — попробуй ещё раз', 'bad'); soft(); } }, 20000); render(); }
+      const id = b.dataset.sk; if (id === (S.heroes[me] || {}).skin || S.busy) return;
+      if (!gmOn()) return ask('skin', { id });
+      S.skWant = id; busy('Меняем облик на «' + (window.EkTheme ? window.EkTheme.name(id) : id) + '»', 'Экосистема Мастера перекрашивает кубик — пару секунд');
+      if (!(await ask('skin', { id }))) { S.skWant = null; busy(null); }
     }));
     if (S.tab === 'rolls' && S.fresh) {
       const el = app.querySelector('.big'), dz = el && el.querySelector('.d20'); if (el) el.classList.add('pop'); if (dz) dz.classList.add('roll-in');
@@ -263,7 +276,7 @@
   function vSkins(H) {
     const L = H.skins || [], cur = H.skin || 'classic', off = !gmOn();
     return `<h3>Облик кубика <small>${esc(window.EkTheme ? window.EkTheme.name(cur) : cur)} · открыто ${L.length}</small></h3>
-      <div class="skins">${L.map((s) => `<button class="sk r${s.r || 1} ${s.id === cur ? 'on' : ''} ${S.skPend === s.id ? 'pend' : ''}" data-sk="${esc(s.id)}" ${off ? 'disabled' : ''} title="${esc(s.t + (s.x ? ': ' + s.x : ''))}"><img src="${dimg(s.id)}" alt="" loading="lazy"><span>${esc(s.t)}</span></button>`).join('')}</div>
+      <div class="skins">${L.map((s) => `<button class="sk r${s.r || 1} ${s.id === cur ? 'on' : ''} ${S.skWant === s.id ? 'pend' : ''}" data-sk="${esc(s.id)}" ${off ? 'disabled' : ''} title="${esc(s.t + (s.x ? ': ' + s.x : ''))}"><img src="${dimg(s.id)}" alt="" loading="lazy"><span>${esc(s.t)}</span></button>`).join('')}</div>
       <p class="note">${off ? 'Сменить облик можно, когда Мастер в сети.' : 'Нажми на облик — кубик и весь экран сменятся. Новые облики открываются достижениями и у Тыквенного торговца.'}</p>`;
   }
   function vSpecials(H) {
@@ -292,7 +305,7 @@
   }
   function vTeam() {
     const T = S.game.team || {};
-    return `<h3>${esc(T.party || 'Отряд')}</h3>${HEROES.map((k) => { const H = S.heroes[k] || {}, w = WH[Math.min(7, H.whistle || 0)]; return `<div class="card hero sm" style="--hc:${heroCol(k)}"><div class="hrow"><div><h2>${esc(H.name || heroName(k))}</h2><span class="wh" style="--wc:${w[2]}"><i></i>${w[0]} · ${w[1]}</span></div><div class="right">${money(H.wallet)}${S.game.hw && S.game.hw.live ? `<small>🍬 ${H.candy || 0}</small>` : ''}</div></div>${hpBar(H.hp)}</div>`; }).join('')}
+    return `<h3>${esc(T.party || 'Отряд')}${T.rest === 'long' ? ' <small>☀ долгий отдых — аптечка лечит вдвое</small>' : ''}</h3>${HEROES.map((k) => { const H = S.heroes[k] || {}, w = WH[Math.min(7, H.whistle || 0)]; return `<div class="card hero sm" style="--hc:${heroCol(k)}"><div class="hrow"><div><h2>${esc(H.name || heroName(k))}</h2><span class="wh" style="--wc:${w[2]}"><i></i>${w[0]} · ${w[1]}</span></div><div class="right">${money(H.wallet)}${S.game.hw && S.game.hw.live ? `<small>🍬 ${H.candy || 0}</small>` : ''}</div></div>${hpBar(H.hp)}</div>`; }).join('')}
       ${S.game.board && S.game.board.fund ? `<div class="card"><small>Общий фонд</small> ${money(S.game.board.fund)}</div>` : ''}`;
   }
   function vEvent() {
