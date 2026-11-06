@@ -350,7 +350,7 @@
         ${q.text ? `<p class="qz-t">${esc(q.text)}</p>` : ''}
         <dl>
           <div><dt>Награда</dt><dd>${money(q.res === 'done' && q.paid ? q.paid : q.reward)}</dd></div>
-          <div><dt>Сложность</dt><dd>${DIFFI[q.diff || 1]} ${esc(DIFFN[q.diff || 1])}</dd></div>
+          <div><dt>Сложность</dt><dd>${DIFFI[q.diff || 1]} ${esc(DIFFN[q.diff || 1])}${q.fr != null && !q.res ? `<small class="qz-fr">провал — штраф ${q.fr}% награды</small>` : ''}</dd></div>
           <div><dt>Где</dt><dd>${esc(q.ln || 'Слой ' + (q.layer || 0))}</dd></div>
           <div><dt>Допуск</dt><dd><i class="dot" style="background:${w[2]}"></i>${esc(w[0])} свисток</dd></div>
           ${q.item && (q.item.name || q.qty) ? `<div><dt>Добыча</dt><dd>${esc(q.item.name || q.item.type || '—')}${q.qty ? ' · ' + (it.mode === 'taken' ? (q.got || 0) + ' из ' : '') + q.qty : ''}</dd></div>` : ''}
