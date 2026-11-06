@@ -122,11 +122,14 @@
   function render() {
     if (!S.prof || S.prof.role === 'pending') return;
     const me = myHero(), H = S.heroes[me] || {}, F = S.game.fight, c = curTurn(F), myTurn = c && c.kind === 'pl' && c.key === me;
+    skinTheme(H.skin);
+    const gmOff = S.game.gm && S.game.gm.on === false;
     const head = `<header class="top" style="--hc:${heroCol(me)}">
       <div class="who"><i class="dot"></i><div><b>${esc(me ? heroName(me) : S.prof.role === 'gm' ? 'Мастер' : '')}</b><small>${esc((S.game.team && S.game.team.party) || 'Отряд')}${S.game.clock ? ' · ' + esc(S.game.clock.time) + ' · день ' + esc(S.game.clock.day) : ''}</small></div></div>
       <div class="bal">${me ? money(H.wallet) : ''}${me && S.game.hw && S.game.hw.live ? `<span class="candy">🍬 ${H.candy || 0}</span>` : ''}</div>
-      <span class="live ${S.live ? 'on' : ''}" title="Связь с Экосистемой Мастера"></span>
+      <span class="live ${S.live && !gmOff ? 'on' : ''}" title="${gmOff ? 'Мастер не в сети' : 'Связь с Экосистемой Мастера'}"></span>
     </header>
+    ${gmOff ? `<div class="offline">Мастер сейчас не в сети — здесь то, что он отправил последним${S.game.gm.t ? ' (' + esc(ago(S.game.gm.t)) + ')' : ''}.</div>` : ''}
     ${myTurn ? '<div class="turn">⚔ ТВОЙ ХОД</div>' : ''}`;
     const tabs = TABS.filter(([id]) => id !== 'event' || (S.game.hw && S.game.hw.live));
     if (!tabs.find(([id]) => id === S.tab)) S.tab = 'rolls';
@@ -137,9 +140,18 @@
     app.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => { S.tab = b.dataset.t; store.set('ek_tab', S.tab); window.scrollTo(0, 0); render(); }));
     const snd = app.querySelector('#snd'); if (snd) snd.addEventListener('change', () => { S.sound = snd.checked; store.set('ek_sound', S.sound); if (S.sound) beep(660, 0.2); });
     const out = app.querySelector('#out'); if (out) out.addEventListener('click', () => sb.auth.signOut());
+    const fxo = app.querySelector('#fxo'); if (fxo) fxo.addEventListener('change', () => window.EkTheme && window.EkTheme.fx(fxo.checked));
     if (S.tab === 'rolls' && S.fresh) { const el = app.querySelector('.big'); if (el) el.classList.add('pop'); S.fresh = null; } else window.scrollTo(0, y);
   }
-  function paintLive() { const el = app.querySelector('.live'); if (el) el.classList.toggle('on', !!S.live); }
+  function paintLive() { const el = app.querySelector('.live'); if (el) el.classList.toggle('on', !!S.live && !(S.game.gm && S.game.gm.on === false)); }
+  // облик кубика меняет атмосферу экрана
+  let skinSeen = null;
+  function skinTheme(id) {
+    if (!window.EkTheme || !id) return;
+    const T = window.EkTheme;
+    if (skinSeen && skinSeen !== id) { const t = document.createElement('div'); t.className = 'skin-toast'; t.innerHTML = '<small>новый облик</small>' + esc(T.name(id)); document.body.appendChild(t); setTimeout(() => t.remove(), 3400); buzz(30); }
+    skinSeen = id; T.set(id);
+  }
 
   const rollCls = (r) => (r.kind === 'crit' ? 'crit' : r.kind === 'fail' ? 'fail' : r.kind === 'special' ? 'special' : '');
   const rollTxt = (r) => (r.kind === 'special' ? esc(r.label || r.value) : esc(r.value));
@@ -162,19 +174,20 @@
   function vMe() {
     const me = myHero(); if (!me) return '<div class="empty">Ты не привязан к герою.</div>';
     const H = S.heroes[me] || {}, w = WH[Math.min(7, H.whistle || 0)], items = itemsOf(H), bf = bufText(H.buf, H.prank), hw = S.game.hw && S.game.hw.live;
-    return `<div class="card hero" style="--hc:${heroCol(me)}"><div class="hrow"><div><h2>${esc(H.name || heroName(me))}</h2><span class="wh" style="--wc:${w[2]}"><i></i>${w[0]} свисток · ${w[1]}</span></div>${H.curse ? `<span class="curse">☂ ${esc(H.curse.name)} · ${H.curse.stage}/3</span>` : ''}</div>
+    return `<div class="card hero" style="--hc:${heroCol(me)}"><div class="hrow"><div><h2>${esc(H.name || heroName(me))}</h2><span class="wh" style="--wc:${w[2]}"><i></i>${w[0]} свисток · ${w[1]}</span></div></div>
       <div class="stats"><div><small>Кошелёк</small>${money(H.wallet)}</div>${hw ? `<div><small>Конфеты</small><b>🍬 ${H.candy || 0}</b></div>` : ''}${H.stats ? `<div><small>Бросков</small><b>${H.stats.rolls}</b></div><div><small>Двадцаток</small><b>${H.stats.n20}</b></div><div><small>Единиц</small><b>${H.stats.n1}</b></div><div><small>Средний</small><b>${H.stats.avg || '—'}</b></div>` : ''}</div></div>
       ${bf.length ? `<div class="card buffs"><small>Действует сейчас</small><p>${bf.map(esc).join(' · ')}</p></div>` : ''}
       ${items.length ? `<h3>Инвентарь</h3><div class="grid">${items.map((x) => `<div class="card it r${x.d.r || 1}"><i>${esc(x.d.ic)}</i><div><b>${esc(x.d.n)}${x.n > 1 ? ' ×' + x.n : ''}</b><p>${esc(x.d.d)}</p></div></div>`).join('')}</div>` : hw ? '<h3>Инвентарь</h3><div class="empty sm">Пусто. Загляни к Тыквенному торговцу.</div>' : ''}
       <h3>Достижения · ${(H.ach || []).length}${H.achTotal ? ' из ' + H.achTotal : ''}</h3>
       ${(H.ach || []).length ? `<div class="achs">${H.ach.slice(0, 60).map((a) => `<div class="ach lv${a.lv}" title="${esc(a.d)}"><i>${esc(a.ic)}</i><div><b>${esc(a.t)}</b><small>${esc(a.d)}</small></div></div>`).join('')}</div>` : '<div class="empty sm">Пока ни одного. Всё впереди.</div>'}
-      <div class="card opts"><label><input type="checkbox" id="snd" ${S.sound ? 'checked' : ''}> Звук при бросках и «твой ход»</label><button class="btn ghost" id="out">Выйти из аккаунта</button></div>`;
+      <h3>Облик кубика</h3><div class="card skinrow"><i class="sw"></i><div><b>${esc(window.EkTheme ? window.EkTheme.name(H.skin) : H.skin || 'Классика')}</b><small>Экран живёт в атмосфере твоего облика. Сменит Мастер — сменится и экран.</small></div></div>
+      <div class="card opts"><label><input type="checkbox" id="snd" ${S.sound ? 'checked' : ''}> Звук при бросках и «твой ход»</label><label><input type="checkbox" id="fxo" ${!window.EkTheme || window.EkTheme.fxOn ? 'checked' : ''}> Живой фон</label><button class="btn ghost" id="out">Выйти из аккаунта</button></div>`;
   }
   function qCard(q, taken) {
     const left = q.due ? Math.ceil((q.due - ((S.game.clock && S.game.clock.t) || Date.now())) / 86400000) : null, w = WH[Math.min(7, q.wh || 0)];
     return `<div class="card quest ${q.res ? q.res : ''}"><div class="qh"><b>${esc(q.title)}</b><span class="rew">${money(q.reward)}</span></div><p>${esc(q.text)}</p>
       <div class="qm"><span>${'◆'.repeat(Math.max(1, q.diff || 1))}</span><span>слой ${q.layer || 0}</span><span class="wh" style="--wc:${w[2]}"><i></i>от ${w[0].toLowerCase()}</span>${q.qty ? `<span>${q.got || 0}/${q.qty}</span>` : ''}${taken && left != null ? `<span class="${left < 1 ? 'late' : ''}">${left < 1 ? 'срок вышел' : 'осталось ' + left + ' дн.'}</span>` : ''}${q.days && !taken ? `<span>${q.days} дн.</span>` : ''}</div>
-      ${q.team && q.team.length ? `<div class="qt">${q.team.map((k) => `<span style="--hc:${heroCol(k)}"><i></i>${esc(heroName(k))}</span>`).join('')}</div>` : ''}${q.twist ? `<div class="tw">⚠ ${esc(q.twist.t || q.twist)}</div>` : ''}</div>`;
+      ${q.team && q.team.length ? `<div class="qt">${q.team.map((k) => `<span style="--hc:${heroCol(k)}"><i></i>${esc(heroName(k))}</span>`).join('')}</div>` : ''}</div>`;
   }
   function vBoard() {
     const B = S.game.board; if (!B) return '<div class="empty">Доска заказов пока пуста.</div>';
@@ -191,7 +204,7 @@
   }
   function vTeam() {
     const T = S.game.team || {};
-    return `<h3>${esc(T.party || 'Отряд')}</h3>${HEROES.map((k) => { const H = S.heroes[k] || {}, w = WH[Math.min(7, H.whistle || 0)]; return `<div class="card hero sm" style="--hc:${heroCol(k)}"><div class="hrow"><div><h2>${esc(H.name || heroName(k))}</h2><span class="wh" style="--wc:${w[2]}"><i></i>${w[0]} · ${w[1]}</span></div><div class="right">${money(H.wallet)}${S.game.hw && S.game.hw.live ? `<small>🍬 ${H.candy || 0}</small>` : ''}</div></div>${H.curse ? `<span class="curse">☂ ${esc(H.curse.name)}</span>` : ''}</div>`; }).join('')}
+    return `<h3>${esc(T.party || 'Отряд')}</h3>${HEROES.map((k) => { const H = S.heroes[k] || {}, w = WH[Math.min(7, H.whistle || 0)]; return `<div class="card hero sm" style="--hc:${heroCol(k)}"><div class="hrow"><div><h2>${esc(H.name || heroName(k))}</h2><span class="wh" style="--wc:${w[2]}"><i></i>${w[0]} · ${w[1]}</span></div><div class="right">${money(H.wallet)}${S.game.hw && S.game.hw.live ? `<small>🍬 ${H.candy || 0}</small>` : ''}</div></div></div>`; }).join('')}
       ${S.game.board && S.game.board.fund ? `<div class="card"><small>Общий фонд</small> ${money(S.game.board.fund)}</div>` : ''}`;
   }
   function vEvent() {
