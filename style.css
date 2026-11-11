@@ -332,3 +332,36 @@ body.shake #app { animation: shake .45s; }
 .is-d { margin: 0; color: var(--ink2); font: 400 14px/1.5 Lora, serif; } .is-seg { max-width: 220px; }
 .is-acts { display: grid; gap: 8px; } .is-acts .btn { width: 100%; text-align: left; display: flex; justify-content: space-between; align-items: center; } .is-acts .btn small { color: var(--ink2); font-weight: 600; font-size: 11.5px; } .is-acts .btn:disabled { opacity: .4; }
 @keyframes sheetUp { from { transform: translateY(100%); } } @keyframes sheetDown { to { transform: translateY(100%); } }
+
+/* ---------- v7.1: вещи черновиком, сколько штук, передать товарищу, перевес ---------- */
+.whi { width: 1.25em; height: 1.25em; display: inline-block; vertical-align: -.22em; filter: drop-shadow(0 1px 1px rgba(0,0,0,.5)); }
+.bi > i .whi, .pack-h > i .whi { width: 34px; height: 34px; vertical-align: middle; } .is-h > i .whi { width: 46px; height: 46px; vertical-align: middle; }
+.bi.moved { border-style: dashed; border-color: color-mix(in srgb, var(--brass) 70%, transparent); background: color-mix(in srgb, var(--brass) 9%, var(--card)); }
+.bi.moved::after { content: 'черновик'; position: absolute; top: 6px; left: 7px; font: 700 9px Inter, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: var(--brass); }
+.bag-bar { position: relative; } .bag-bar u { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,.45); z-index: 1; }
+.enc { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: baseline; }
+.enc b { font: 800 13px Inter, sans-serif; color: #8af0a0; } .enc span { font-size: 13px; color: var(--ink); } .enc small { flex-basis: 100%; color: var(--ink2); font-size: 11.5px; } .enc small.warn { color: #ff9a8a; }
+.bag-top.lv1 .enc b { color: #ffd56a; } .bag-top.lv2 .enc b, .bag-top.lv3 .enc b { color: #ff7a6a; }
+.bag-top.lv1 .bag-bar i { background: linear-gradient(90deg, var(--teal), #ffd56a); } .bag-top.lv2 .bag-bar i, .bag-top.lv3 .bag-bar i { background: linear-gradient(90deg, #e0645a, #ff9a8a); }
+.bag-top.lv2 b, .bag-top.lv3 b { color: var(--red); }
+.coins-row { display: flex; gap: 12px; align-items: center; } .coins-row > i { font-style: normal; font-size: 26px; } .coins-row b { display: block; font-size: 13.5px; } .coins-row small { color: var(--ink2); font-size: 11.5px; } .coins-row em { margin-left: auto; font: 700 13px Inter, sans-serif; color: var(--brass); font-style: normal; white-space: nowrap; }
+.pack.over { border-color: rgba(224,100,90,.7); } .pack.over .bag-bar i { background: linear-gradient(90deg, #e0645a, #ff9a8a); } .pack.over .pack-h small { color: #ff9a8a; }
+.drbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(70px + env(safe-area-inset-bottom)); z-index: 12; width: min(560px, calc(100vw - 20px)); display: flex; gap: 8px; align-items: center; padding: 10px 10px 10px 16px; border-radius: 18px 5px 18px 5px; border: 1px solid color-mix(in srgb, var(--brass) 60%, transparent); background: color-mix(in srgb, var(--bg) 92%, #000); box-shadow: 0 12px 30px rgba(0,0,0,.5); animation: drIn .25s ease; }
+.drbar > div { flex: 1; min-width: 0; } .drbar b { display: block; font-size: 14px; } .drbar small { display: block; color: var(--ink2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drbar.bad { border-color: rgba(224,100,90,.75); } .drbar.bad small { color: #ff9a8a; } .drbar .btn { height: 40px; padding: 0 14px; }
+@keyframes drIn { from { opacity: 0; transform: translate(-50%, 12px); } }
+.pane:has(.drbar) { padding-bottom: 150px; }
+.tabs button em.dr { background: var(--brass); box-shadow: 0 0 8px var(--brass); }
+.qty { display: grid; gap: 8px; padding: 12px; border-radius: 14px; background: rgba(0,0,0,.22); }
+.qty-h { display: flex; gap: 8px; align-items: baseline; } .qty-h span { color: var(--ink2); font-size: 13px; } .qty-h b { font: 600 24px Lora, serif; color: var(--brass); } .qty-h small { color: var(--ink2); font-size: 12px; } .qty-h em { font-style: normal; color: var(--ink); }
+.qty input[type=range] { width: 100%; accent-color: var(--brass); }
+.qty-b { display: flex; flex-wrap: wrap; gap: 6px; } .qty-b button { height: 34px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--rule); background: rgba(255,255,255,.04); color: var(--ink); font-weight: 700; cursor: pointer; } .qty-b button.on { border-color: var(--brass); color: var(--brass); }
+.qty-b input.qnum { width: 76px; height: 34px; margin-left: auto; border-radius: 10px; border: 1px solid var(--rule); background: rgba(0,0,0,.3); color: var(--ink); padding: 0 10px; font: 700 15px Inter, sans-serif; text-align: center; }
+.is-mates { display: grid; gap: 8px; margin-top: 4px; padding-top: 10px; border-top: 1px dashed var(--rule); } .is-mates .btn { border-color: color-mix(in srgb, var(--hc) 55%, transparent); }
+.lot .btn.buy { margin-top: 8px; width: 100%; height: 38px; border-color: rgba(255,179,71,.55); color: #ffcf8a; } .lot .btn.buy:not(:disabled):hover { background: rgba(255,179,71,.12); }
+button.it.hwi { width: 100%; text-align: left; color: var(--ink); font: inherit; cursor: pointer; position: relative; padding-bottom: 26px; } button.it.hwi:disabled { cursor: default; opacity: .75; }
+.it.hwi .use { position: absolute; right: 12px; bottom: 8px; font: 800 11px Inter, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #ffb347; }
+.jf { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; } .jf button { height: 32px; padding: 0 12px; border-radius: 16px; border: 1px solid var(--rule); background: rgba(255,255,255,.03); color: var(--ink2); font-weight: 700; font-size: 13px; cursor: pointer; } .jf button.on { color: var(--ink); border-color: var(--brass); background: color-mix(in srgb, var(--brass) 14%, transparent); } .jf small { color: var(--ink2); font-weight: 600; margin-left: 3px; }
+.jr li.k-inv i { color: var(--brass); }
+.xpb.dnd .xpt span i { background: #e0645a; box-shadow: 0 0 8px #e0645a; } .xpb.dnd .xpl i { background: linear-gradient(90deg, #a83a32, #f5a06a); box-shadow: 0 0 12px rgba(224,100,90,.4); }
+.lvfx.dnd em { font-size: 16px; letter-spacing: .04em; max-width: 80vw; text-align: center; }
