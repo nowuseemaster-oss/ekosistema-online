@@ -50,41 +50,156 @@ var EkNotes = (function () {
     return fixBoard(D);
   }
   // ---------- блокнот ----------
-  //  o: { book: { pages, at }, onChange(), confirm(text, opts) → Promise<bool>, rustle(len, hi), hint, color }
+  //  Полка: { books: [{ id, name, c, pages: [{ id, ti, html, tx, t }], at }], cur }.
+  //  Старый формат { pages, at } (простой текст) переносится в первый блокнот сам.
+  const COVER = { r: ['#7a1f24', 'Алый'], b: ['#1f3f7a', 'Синий'], g: ['#2a5a33', 'Зелёный'], v: ['#4a2a6a', 'Фиолетовый'], k: ['#2a2622', 'Чёрный'], o: ['#8a5a1a', 'Охра'] };
+  const MARK = { y: ['#fff176', 'Жёлтый маркер'], g: ['#a5f0a0', 'Зелёный маркер'], p: ['#ffb3d1', 'Розовый маркер'], b: ['#9fd8ff', 'Голубой маркер'] };
+  const INK = { r: ['#c0262d', 'Красные чернила'], u: ['#1f4fb0', 'Синие чернила'], k: ['#2a2418', 'Обычные чернила'] };
+  const escH = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const txt2html = (t) => escH(t).replace(/\n/g, '<br>');
+  // разрешено только своё оформление: жирный, курсив, подчёркивание, зачёркивание, маркер, цвет, заголовок, список
+  const OKTAG = { B: 1, STRONG: 1, I: 1, EM: 1, U: 1, S: 1, STRIKE: 1, DEL: 1, BR: 1, DIV: 1, P: 1, SPAN: 1, UL: 1, OL: 1, LI: 1, MARK: 1, H3: 1, FONT: 1 };
+  const OKCSS = /^(background-color|color|text-decoration|text-decoration-line|font-weight|font-style)$/;
+  const OKVAL = /^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|transparent|bold|bolder|normal|italic|underline|line-through|underline line-through|line-through underline|none|[1-9]00)$/i;
+  function clean(html) {
+    const box = document.createElement('div'); box.innerHTML = String(html || '');
+    (function walk(n) {
+      [...n.childNodes].forEach((c) => {
+        if (c.nodeType === 3) return;
+        if (c.nodeType !== 1 || !OKTAG[c.tagName]) { if (c.nodeType === 1 && !/^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|svg|SVG|IMG|VIDEO|AUDIO)$/.test(c.tagName)) { walk(c); while (c.firstChild) n.insertBefore(c.firstChild, c); } c.remove(); return; }
+        let el = c;
+        if (c.tagName === 'FONT') { el = document.createElement('span'); const col = c.getAttribute('color'); if (col && OKVAL.test(col)) el.style.color = col; while (c.firstChild) el.appendChild(c.firstChild); n.replaceChild(el, c); }
+        const keep = [];
+        if (el.style) for (let i = 0; i < el.style.length; i++) { const k = el.style[i], v = el.style.getPropertyValue(k).trim(); if (OKCSS.test(k) && OKVAL.test(v)) keep.push(k + ': ' + v); }
+        [...el.attributes].forEach((at) => el.removeAttribute(at.name));
+        if (keep.length) el.setAttribute('style', keep.join('; '));
+        walk(el);
+      });
+    })(box);
+    return box.innerHTML.slice(0, 120000);
+  }
+  function normShelf(S) {
+    S = S && typeof S === 'object' ? S : {};
+    if (!Array.isArray(S.books)) { const old = Array.isArray(S.pages) && S.pages.length ? { id: 'b1', name: 'Блокнот', c: 'r', pages: S.pages, at: S.at | 0 } : null; S = { books: old ? [old] : [], cur: old ? 'b1' : null }; }
+    S.books = S.books.filter((b) => b && typeof b === 'object').slice(0, 30);
+    if (!S.books.length) S.books.push({ id: uid(), name: 'Блокнот', c: 'r', pages: [], at: 0 });
+    S.books.forEach((b) => {
+      b.id = String(b.id || uid()); b.name = String(b.name || 'Блокнот').slice(0, 40); if (!COVER[b.c]) b.c = 'r';
+      b.pages = (Array.isArray(b.pages) ? b.pages : []).filter((p) => p && typeof p === 'object').slice(0, 300);
+      b.pages.forEach((p) => { p.id = String(p.id || uid()); p.ti = String(p.ti || '').slice(0, 80); if (p.html == null) p.html = txt2html(p.tx); p.t = +p.t || Date.now(); });
+      if (!b.pages.length) b.pages.push({ id: uid(), ti: '', html: '', tx: '', t: Date.now() });
+      b.at = Math.max(0, Math.min(b.pages.length - 1, b.at | 0));
+    });
+    if (!S.books.some((b) => b.id === S.cur)) S.cur = S.books[0].id;
+    return S;
+  }
+  const shelfT = (S) => Math.max(0, ...normShelf(S).books.map((b) => Math.max(0, ...b.pages.map((p) => +p.t || 0))));
+  //  o: { book: полка, onChange(), confirm(text, opts) → Promise<bool>, prompt(text, val) → Promise<string|null>, rustle(len, hi), hint, color }
   function mountBook(B, o) {
-    const bk = o.book;
-    if (!Array.isArray(bk.pages) || !bk.pages.length) bk.pages = [{ id: uid(), ti: '', tx: '', t: Date.now() }];
-    bk.at = Math.max(0, Math.min(bk.pages.length - 1, bk.at | 0));
+    const SH = normShelf(o.book);
+    if (SH !== o.book) { Object.keys(o.book).forEach((k) => delete o.book[k]); Object.assign(o.book, SH); }
+    const shelf = o.book;
     const save = () => o.onChange && o.onChange();
     const rustle = o.rustle || (() => {});
+    const ask = o.prompt || ((t, v) => Promise.resolve(window.prompt(t, v)));
+    let bk = shelf.books.find((b) => b.id === shelf.cur);
+    // полка: блокноты
+    const bar = h('div', 'nb-shelf');
+    B.appendChild(bar);
+    function paintShelf() {
+      bar.innerHTML = '';
+      shelf.books.forEach((b) => {
+        const t = h('button', 'nb-bk' + (b === bk ? ' on' : '')); t.type = 'button'; t.style.setProperty('--bc', COVER[b.c][0]);
+        t.appendChild(h('i')); t.appendChild(h('span', '', b.name)); t.title = b.name + ' · страниц: ' + b.pages.length;
+        t.addEventListener('click', () => { if (b === bk) return; bk = b; shelf.cur = b.id; rustle(0.25, 2200); save(); paintShelf(); show(); });
+        bar.appendChild(t);
+      });
+      const nw = h('button', 'nb-bk add', '+ Блокнот'); nw.type = 'button'; nw.title = 'Новый блокнот';
+      nw.addEventListener('click', async () => {
+        if (shelf.books.length >= 30) return;
+        const name = await ask('Как назвать новый блокнот?', 'Блокнот ' + (shelf.books.length + 1)); if (name == null) return;
+        const keys = Object.keys(COVER), b = { id: uid(), name: String(name).trim().slice(0, 40) || 'Блокнот', c: keys[shelf.books.length % keys.length], pages: [{ id: uid(), ti: '', html: '', tx: '', t: Date.now() }], at: 0 };
+        shelf.books.push(b); bk = b; shelf.cur = b.id; rustle(0.3, 2000); save(); paintShelf(); show();
+      });
+      bar.appendChild(nw);
+      const ed = h('span', 'nb-bked');
+      const rn = h('button', 'nb-ic', '✎'); rn.type = 'button'; rn.title = 'Переименовать блокнот';
+      rn.addEventListener('click', async () => { const n = await ask('Новое название блокнота', bk.name); if (n == null) return; bk.name = String(n).trim().slice(0, 40) || bk.name; save(); paintShelf(); });
+      const cc = h('span', 'nb-cc'); Object.keys(COVER).forEach((c) => { const b = h('button', c === bk.c ? 'on' : ''); b.type = 'button'; b.title = COVER[c][1] + ' переплёт'; b.style.background = COVER[c][0]; b.addEventListener('click', () => { bk.c = c; save(); paintShelf(); wrap.style.setProperty('--bc', COVER[c][0]); }); cc.appendChild(b); });
+      const dl = h('button', 'nb-ic', '🗑'); dl.type = 'button'; dl.title = 'Выбросить блокнот';
+      dl.addEventListener('click', async () => {
+        const has = bk.pages.some((p) => p.ti || (p.tx || '').trim() || (p.html || '').replace(/<[^>]+>/g, '').trim());
+        if (!(await o.confirm(shelf.books.length > 1 ? 'Выбросить блокнот «' + bk.name + '»' + (has ? ' со всеми страницами' : '') + '?' : 'Это последний блокнот — очистить его?', { title: 'Блокнот', ok: shelf.books.length > 1 ? 'Выбросить' : 'Очистить' }))) return;
+        rustle(0.5, 1400);
+        if (shelf.books.length > 1) { shelf.books.splice(shelf.books.indexOf(bk), 1); bk = shelf.books[0]; shelf.cur = bk.id; }
+        else { bk.pages = [{ id: uid(), ti: '', html: '', tx: '', t: Date.now() }]; bk.at = 0; }
+        save(); paintShelf(); show();
+      });
+      ed.append(rn, cc, dl); bar.appendChild(ed);
+    }
+    // панель оформления: кнопки не забирают фокус у страницы, выделение не теряется
+    const tb = h('div', 'nb-tb');
+    let saved = null, edEl = null;
+    const keepSel = () => { if (!tb.isConnected) return; try { const s = window.getSelection(); if (s.rangeCount && edEl && edEl.contains(s.anchorNode)) saved = s.getRangeAt(0).cloneRange(); } catch (e) {} };
+    document.addEventListener('selectionchange', keepSel);
+    const tool = (label, title, fn, cls) => { const b = h('button', 'nb-tl' + (cls ? ' ' + cls : ''), label); b.type = 'button'; b.title = title; b.addEventListener('pointerdown', (e) => e.preventDefault()); b.addEventListener('mousedown', (e) => e.preventDefault()); b.addEventListener('click', () => run(fn)); tb.appendChild(b); return b; };
+    function run(fn) {
+      if (!edEl) return;
+      if (document.activeElement !== edEl) { edEl.focus(); if (saved) { try { const s = window.getSelection(); s.removeAllRanges(); s.addRange(saved); } catch (e) {} } }
+      try { document.execCommand('styleWithCSS', false, true); } catch (e) {}
+      fn(); edEl.dispatchEvent(new Event('input')); keepSel(); paintState();
+    }
+    const ex = (c, v) => () => { try { document.execCommand(c, false, v); } catch (e) {} };
+    const tB = tool('Ж', 'Жирный', ex('bold'), 'b'), tI = tool('К', 'Курсив', ex('italic'), 'i'), tU = tool('Ч', 'Подчеркнуть', ex('underline'), 'u'), tS = tool('З', 'Зачеркнуть', ex('strikeThrough'), 's');
+    tb.appendChild(h('i', 'nb-sep'));
+    Object.keys(MARK).forEach((k) => { const b = tool('', MARK[k][1], () => { const cur = document.queryCommandValue('hiliteColor') || document.queryCommandValue('backColor'); const same = cur && cur.replace(/\s/g, '') === hexRgb(MARK[k][0]); ex(document.queryCommandSupported('hiliteColor') ? 'hiliteColor' : 'backColor', same ? 'transparent' : MARK[k][0])(); }, 'mk'); b.style.setProperty('--mk', MARK[k][0]); });
+    tb.appendChild(h('i', 'nb-sep'));
+    Object.keys(INK).forEach((k) => { const b = tool('А', INK[k][1], ex('foreColor', INK[k][0]), 'ink'); b.style.color = INK[k][0]; });
+    tb.appendChild(h('i', 'nb-sep'));
+    tool('H', 'Заголовок', () => { const v = String(document.queryCommandValue('formatBlock') || '').toLowerCase(); ex('formatBlock', v === 'h3' ? 'div' : 'h3')(); }, 'h');
+    tool('•', 'Список', ex('insertUnorderedList'), 'li');
+    tool('⌫', 'Убрать оформление', () => { ex('removeFormat')(); ex(document.queryCommandSupported('hiliteColor') ? 'hiliteColor' : 'backColor', 'transparent')(); }, 'cl');
+    tb.appendChild(h('i', 'nb-sep'));
+    tool('↶', 'Отменить', ex('undo'), 'un'); tool('↷', 'Вернуть', ex('redo'), 'un');
+    function hexRgb(x) { const n = parseInt(x.slice(1), 16); return 'rgb(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ')'; }
+    function paintState() { try { [[tB, 'bold'], [tI, 'italic'], [tU, 'underline'], [tS, 'strikeThrough']].forEach(([b, c]) => b.classList.toggle('on', !!document.queryCommandState(c))); } catch (e) {} }
+    document.addEventListener('selectionchange', () => { if (tb.isConnected && edEl && document.activeElement === edEl) paintState(); });
+    B.appendChild(tb);
     const wrap = h('div', 'nb-wrap'); if (o.color) wrap.style.setProperty('--pc', o.color);
     const cover = h('div', 'nb-cover');
     const rings = h('div', 'nb-rings'); for (let i = 0; i < 11; i++) rings.appendChild(h('i'));
     const stack = h('div', 'nb-stack'), page = h('div', 'nb-page');
     cover.append(stack, page, rings); wrap.appendChild(cover); B.appendChild(wrap);
     const nav = h('div', 'nb-nav');
-    const prev = h('button', 'btn ghost', '◀'), nx = h('button', 'btn ghost', '▶'), num = h('span', 'nb-num'), add = h('button', 'btn', '+ Новая страница'), del = h('button', 'btn ghost nb-del', '🗑 Вырвать страницу');
+    const prev = h('button', 'btn ghost', '◀'), nx = h('button', 'btn ghost', '▶'), num = h('span', 'nb-num'), add = h('button', 'btn', '+ Страница'), del = h('button', 'btn ghost nb-del', '🗑 Вырвать');
     [prev, nx, add, del].forEach((b) => { b.type = 'button'; });
-    prev.title = 'Предыдущая страница'; nx.title = 'Следующая страница';
+    prev.title = 'Предыдущая страница'; nx.title = 'Следующая страница'; del.title = 'Вырвать страницу';
     nav.append(prev, num, nx, add, del); B.appendChild(nav);
     if (o.hint) B.appendChild(h('p', 'nb-hint', o.hint));
-    function fill(el, p, i) {
+    const empty = (p) => !p.ti && !(p.html || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, '').trim();
+    function fill(el, p, i, live) {
       el.innerHTML = '';
       const hd = h('div', 'nb-ph'), ti = h('input', 'nb-ti'); ti.placeholder = 'Без названия'; ti.maxLength = 80; ti.value = p.ti || '';
       hd.append(ti, h('small', 'nb-date', fmtD(p.t)));
-      const tx = h('textarea', 'nb-tx'); tx.placeholder = i === 0 && !p.tx ? 'Пиши здесь — всё сохранится само…' : ''; tx.value = p.tx || ''; tx.spellcheck = false; tx.maxLength = 20000;
+      const tx = h('div', 'nb-tx nb-ed'); tx.contentEditable = live ? 'true' : 'false'; tx.spellcheck = false; tx.innerHTML = clean(p.html); tx.dataset.ph = i === 0 && empty(p) ? 'Пиши здесь — всё сохранится само…' : '';
       el.append(hd, tx, h('div', 'nb-pf', '— ' + (i + 1) + ' —'));
       const curl = h('button', 'nb-curl'); curl.type = 'button'; curl.title = i < bk.pages.length - 1 ? 'Перевернуть страницу' : 'Новая страница'; el.appendChild(curl);
       curl.addEventListener('click', () => (i < bk.pages.length - 1 ? turn(1) : newPage()));
+      if (!live) return { ti, tx };
       ti.addEventListener('input', () => { p.ti = ti.value; p.t = Date.now(); save(); });
-      tx.addEventListener('input', () => { p.tx = tx.value; p.t = Date.now(); save(); });
+      tx.addEventListener('input', () => { p.html = clean(tx.innerHTML); p.tx = tx.innerText.slice(0, 40000); p.t = Date.now(); tx.dataset.ph = ''; save(); });
+      // вставка — только текстом, без чужого оформления
+      tx.addEventListener('paste', (e) => { const t = e.clipboardData && e.clipboardData.getData('text/plain'); if (t == null) return; e.preventDefault(); try { document.execCommand('insertText', false, t); } catch (er) {} });
+      tx.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && !e.shiftKey && /^[biu]$/i.test(e.key)) { e.preventDefault(); run(ex({ b: 'bold', i: 'italic', u: 'underline' }[e.key.toLowerCase()])); } });
+      edEl = tx; saved = null;
       return { ti, tx };
     }
     let F = null;
     function show() {
-      const p = bk.pages[bk.at]; F = fill(page, p, bk.at);
+      wrap.style.setProperty('--bc', COVER[bk.c][0]);
+      const p = bk.pages[bk.at]; F = fill(page, p, bk.at, true);
       num.textContent = 'стр. ' + (bk.at + 1) + ' из ' + bk.pages.length;
-      prev.disabled = bk.at <= 0; nx.disabled = bk.at >= bk.pages.length - 1; del.disabled = bk.pages.length <= 1 && !p.tx && !p.ti;
+      prev.disabled = bk.at <= 0; nx.disabled = bk.at >= bk.pages.length - 1; del.disabled = bk.pages.length <= 1 && empty(p);
       stack.style.setProperty('--n', Math.min(6, bk.pages.length - 1 - bk.at));
     }
     let busy = false;
@@ -93,31 +208,36 @@ var EkNotes = (function () {
       if (busy || to < 0 || to >= bk.pages.length || to === bk.at) return;
       busy = true; rustle(0.38);
       const leaf = h('div', 'nb-page nb-leaf ' + (d > 0 ? 'fwd' : 'back'));
-      if (d > 0) { fill(leaf, bk.pages[bk.at], bk.at); bk.at = to; show(); } else fill(leaf, bk.pages[to], to);
-      leaf.querySelectorAll('input,textarea,button').forEach((e) => { e.tabIndex = -1; e.setAttribute('aria-hidden', 'true'); });
+      if (d > 0) { fill(leaf, bk.pages[bk.at], bk.at, false); bk.at = to; show(); } else fill(leaf, bk.pages[to], to, false);
+      leaf.querySelectorAll('input,button').forEach((e) => { e.tabIndex = -1; e.setAttribute('aria-hidden', 'true'); });
       cover.appendChild(leaf);
       const done = () => { if (!busy) return; if (d < 0) { bk.at = to; show(); } leaf.remove(); busy = false; save(); };
       leaf.addEventListener('animationend', done, { once: true }); setTimeout(done, 1200);
     }
-    function newPage() { bk.pages.push({ id: uid(), ti: '', tx: '', t: Date.now() }); save(); turn(1, bk.pages.length - 1); setTimeout(() => { try { F.tx.focus(); } catch (e) {} }, 700); }
+    function newPage() { bk.pages.push({ id: uid(), ti: '', html: '', tx: '', t: Date.now() }); save(); turn(1, bk.pages.length - 1); setTimeout(() => { try { F.tx.focus(); } catch (e) {} }, 700); }
     prev.addEventListener('click', () => turn(-1)); nx.addEventListener('click', () => turn(1)); add.addEventListener('click', newPage);
     del.addEventListener('click', async () => {
       const p = bk.pages[bk.at];
-      if ((p.tx || p.ti) && !(await o.confirm('Вырвать страницу «' + (p.ti || 'без названия') + '»? Написанное пропадёт.', { title: 'Вырвать страницу', ok: 'Вырвать' }))) return;
+      if (!empty(p) && !(await o.confirm('Вырвать страницу «' + (p.ti || 'без названия') + '»? Написанное пропадёт.', { title: 'Вырвать страницу', ok: 'Вырвать' }))) return;
       rustle(0.5, 1400);
-      if (bk.pages.length <= 1) bk.pages[0] = { id: uid(), ti: '', tx: '', t: Date.now() };
+      if (bk.pages.length <= 1) bk.pages[0] = { id: uid(), ti: '', html: '', tx: '', t: Date.now() };
       else { bk.pages.splice(bk.at, 1); bk.at = Math.min(bk.at, bk.pages.length - 1); }
       page.classList.add('torn'); setTimeout(() => { page.classList.remove('torn'); show(); save(); }, 380);
     });
     wrap.addEventListener('pointerdown', (e) => e.stopPropagation());
-    wrap.addEventListener('wheel', (e) => { if (e.target.closest('textarea') && e.target.scrollHeight > e.target.clientHeight) return; if (Math.abs(e.deltaY) < 30) return; e.preventDefault(); turn(e.deltaY > 0 ? 1 : -1); }, { passive: false });
+    const inText = (t) => t.closest && t.closest('.nb-ed, input');
+    wrap.addEventListener('wheel', (e) => { const ed = inText(e.target); if (ed && ed.scrollHeight > ed.clientHeight) return; if (Math.abs(e.deltaY) < 30) return; e.preventDefault(); turn(e.deltaY > 0 ? 1 : -1); }, { passive: false });
     // на телефоне — листать пальцем: влево — дальше, вправо — назад (пока не пишешь)
     let tsw = null;
-    wrap.addEventListener('touchstart', (e) => { const t = e.touches[0], typing = document.activeElement && page.contains(document.activeElement) && e.target.closest('textarea,input'); tsw = e.touches.length === 1 && !typing ? [t.clientX, t.clientY, Date.now()] : null; }, { passive: true });
+    wrap.addEventListener('touchstart', (e) => { const t = e.touches[0], typing = document.activeElement && page.contains(document.activeElement) && inText(e.target); tsw = e.touches.length === 1 && !typing ? [t.clientX, t.clientY, Date.now()] : null; }, { passive: true });
     wrap.addEventListener('touchend', (e) => { if (!tsw) return; const t = e.changedTouches[0], dx = t.clientX - tsw[0], dy = t.clientY - tsw[1], ok = Date.now() - tsw[2] < 650 && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.6; tsw = null; if (ok) turn(dx < 0 ? 1 : -1); }, { passive: true });
-    show();
+    paintShelf(); show();
     // чужая правка (с другого устройства) — перерисовать, если сейчас не печатают
-    return { refresh() { if (busy || (document.activeElement && page.contains(document.activeElement))) return false; bk.at = Math.max(0, Math.min(bk.pages.length - 1, bk.at | 0)); show(); return true; } };
+    return { refresh() {
+      if (busy || (document.activeElement && (page.contains(document.activeElement) || bar.contains(document.activeElement)))) return false;
+      const S2 = normShelf(o.book); if (S2 !== o.book) Object.assign(o.book, S2);
+      bk = shelf.books.find((b) => b.id === shelf.cur) || shelf.books[0]; paintShelf(); show(); return true;
+    } };
   }
   // ---------- доска ----------
   //  o: { doc: () => доска, view: {z,x,y}, onChange(), onView(), nm(k), col(k), authors: [ключи] | null, author: () => ключ, setAuthor(k),
@@ -302,5 +422,5 @@ var EkNotes = (function () {
     requestAnimationFrame(applyV);
     return { refresh, view, hint, fit: fitAll };
   }
-  return { W0, H0, PAPER, THR, uid, clone, fixBoard, diff, apply, mountBook, mountBoard };
+  return { W0, H0, PAPER, THR, COVER, uid, clone, fixBoard, diff, apply, mountBook, mountBoard, normShelf, shelfT, clean };
 })();
