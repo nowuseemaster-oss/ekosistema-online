@@ -70,19 +70,16 @@ var EkNotes = (function () {
     for (let i = 1; i < P.length - 1; i++) c.quadraticCurveTo(P[i][0], P[i][1], (P[i][0] + P[i + 1][0]) / 2, (P[i][1] + P[i + 1][1]) / 2);
     c.lineTo(P[P.length - 1][0], P[P.length - 1][1]);
   }
-  // один штрих: сперва во вспомогательный холст целиком, потом — с нужной прозрачностью (без потемнений на самопересечениях)
-  function inkStroke(main, tmp, q, W, H, offY) {
-    const P = inkPts(q, W, offY); if (!P.length) return;
+  // форма штриха — во вспомогательный холст (целиком, без прозрачности); прозрачность — при наложении
+  function inkShape(t, q, W, H, offY) {
+    const P = inkPts(q, W, offY); if (!P.length) return false;
     const w = Math.max(0.6, q.w * W / 10000);
     let y0 = Infinity, y1 = -Infinity; P.forEach((pt) => { if (pt[1] < y0) y0 = pt[1]; if (pt[1] > y1) y1 = pt[1]; });
-    if (y1 < -w * 3 || y0 > H + w * 3) return;
-    if (q.b === 'eraser') { main.save(); main.globalCompositeOperation = 'destination-out'; main.lineCap = main.lineJoin = 'round'; main.lineWidth = w; main.strokeStyle = '#000'; inkPath(main, P); main.stroke(); main.restore(); return; }
-    const t = tmp; t.save(); t.setTransform(1, 0, 0, 1, 0, 0); t.clearRect(0, 0, t.canvas.width, t.canvas.height); t.restore();
+    if (y1 < -w * 3 || y0 > H + w * 3) return false;
     t.save(); t.lineCap = t.lineJoin = 'round'; t.strokeStyle = t.fillStyle = q.c;
     const rnd = seeded(q.p.length * 31 + q.p[0] * 7 + q.p[1]);
-    if (q.b === 'pen') { t.lineWidth = w; inkPath(t, P); t.stroke(); }
-    else if (q.b === 'marker') { t.lineCap = 'square'; t.lineWidth = w; inkPath(t, P); t.stroke(); }
-    else if (q.b === 'pencil') { t.lineWidth = Math.max(0.7, w * 0.55); for (let k = 0; k < 3; k++) { t.globalAlpha = 0.55; t.save(); t.translate((rnd() - 0.5) * w * 0.5, (rnd() - 0.5) * w * 0.5); inkPath(t, P); t.stroke(); t.restore(); } t.globalAlpha = 1; for (let i = 0; i < P.length; i++) if (rnd() < 0.5) { t.globalAlpha = 0.35; t.fillRect(P[i][0] + (rnd() - 0.5) * w, P[i][1] + (rnd() - 0.5) * w, 0.8, 0.8); } }
+    if (q.b === 'pen' || q.b === 'marker' || q.b === 'eraser') { t.lineWidth = w; inkPath(t, P); t.stroke(); }
+    else if (q.b === 'pencil') { t.lineWidth = Math.max(0.7, w * 0.55); for (let k = 0; k < 3; k++) { t.globalAlpha = 0.55; t.save(); t.translate((rnd() - 0.5) * w * 0.5, (rnd() - 0.5) * w * 0.5); inkPath(t, P); t.stroke(); t.restore(); } for (let i = 0; i < P.length; i++) if (rnd() < 0.5) { t.globalAlpha = 0.35; t.fillRect(P[i][0] + (rnd() - 0.5) * w, P[i][1] + (rnd() - 0.5) * w, 0.8, 0.8); } }
     else if (q.b === 'brush') {
       let pw = w;
       for (let i = 0; i < P.length; i++) {
@@ -100,32 +97,61 @@ var EkNotes = (function () {
         for (let k = 0; k < n; k++) { const u = rnd(), an = rnd() * Math.PI * 2, rr = Math.sqrt(rnd()) * w; t.fillRect(a[0] + (b[0] - a[0]) * u + Math.cos(an) * rr, a[1] + (b[1] - a[1]) * u + Math.sin(an) * rr, 1.1, 1.1); }
       }
     }
-    t.restore();
-    main.save(); main.globalAlpha = q.o / 100; main.setTransform(1, 0, 0, 1, 0, 0); main.drawImage(t.canvas, 0, 0); main.restore();
+    t.restore(); return true;
   }
+  const tClear = (t) => { t.save(); t.setTransform(1, 0, 0, 1, 0, 0); t.clearRect(0, 0, t.canvas.width, t.canvas.height); t.restore(); };
+  const compose = (m, t, o) => { m.save(); m.globalAlpha = o / 100; m.setTransform(1, 0, 0, 1, 0, 0); m.drawImage(t.canvas, 0, 0); m.restore(); };
+  function inkErase(m, q, W, H, offY) { m.save(); m.globalCompositeOperation = 'destination-out'; inkShape(m, Object.assign({}, q, { c: '#000000' }), W, H, offY); m.restore(); }
+  // все штрихи страницы: маркер — на своём слое («умножение» поверх текста, как настоящий текстовыделитель),
+  //  проходы одного цвета сливаются в одну заливку — без тёмных полос на нахлёстах
+  function inkRender(mc, kc, tA, tB, list, W, H, offY, skip) {
+    let run = null;
+    const flush = () => { if (run) { compose(kc, tA, run.o); run = null; } };
+    list.forEach((q, i) => {
+      if (skip && skip.has(i)) return;
+      if (q.b === 'eraser') { flush(); inkErase(mc, q, W, H, offY); inkErase(kc, q, W, H, offY); return; }
+      if (q.b === 'marker') { if (!run || run.c !== q.c || run.o !== q.o) { flush(); tClear(tA); run = { c: q.c, o: q.o }; } inkShape(tA, q, W, H, offY); return; }
+      tClear(tB); if (inkShape(tB, q, W, H, offY)) compose(mc, tB, q.o);
+    });
+    flush();
+  }
+  // маркер, которым сейчас ведут, сливается с предыдущими проходами того же цвета
+  function markerRun(list, c, o) { const S2 = new Set(); for (let i = list.length - 1; i >= 0; i--) { const q = list[i]; if (q.b === 'eraser') break; if (q.b !== 'marker') continue; if (q.c === c && q.o === o) S2.add(i); else break; } return S2; }
   // слой рисунка над текстом страницы
   function inkLayer(host, ed, p, live, ctl) {
-    const cv = h('canvas', 'nb-ink'), base = document.createElement('canvas'), tmpC = document.createElement('canvas');
-    const mc = cv.getContext('2d'), bc = base.getContext('2d'), tc = tmpC.getContext('2d');
-    host.appendChild(cv);
-    let W = 0, H = 0, OY = 0, dpr = 1, cur = null, raf = 0, baseOff = -1, dirty = true;
+    const cvK = h('canvas', 'nb-ink nb-ink-mk'), cv = h('canvas', 'nb-ink');
+    const base = document.createElement('canvas'), baseK = document.createElement('canvas'), tA = document.createElement('canvas'), tB = document.createElement('canvas');
+    const mc = cv.getContext('2d'), kc = cvK.getContext('2d'), bc = base.getContext('2d'), bk2 = baseK.getContext('2d'), ta = tA.getContext('2d'), tb2 = tB.getContext('2d');
+    host.appendChild(cvK); host.appendChild(cv);
+    let W = 0, H = 0, OY = 0, dpr = 1, cur = null, raf = 0, baseOff = -1, dirty = true, baseSkip = '';
     function place() {
       // слой — на всю страницу (заголовок и поля тоже), отсчёт — от начала текста
       const nw = ed.offsetWidth, nh = host.clientHeight; if (!nw || !nh) return false;
       if (OY !== ed.offsetTop) { OY = ed.offsetTop; dirty = true; }
-      cv.style.left = ed.offsetLeft + 'px'; cv.style.top = '0px'; cv.style.width = nw + 'px'; cv.style.height = nh + 'px';
+      [cv, cvK].forEach((c) => { c.style.left = ed.offsetLeft + 'px'; c.style.top = '0px'; c.style.width = nw + 'px'; c.style.height = nh + 'px'; });
       const nd = Math.min(2, window.devicePixelRatio || 1);
-      if (nw !== W || nh !== H || nd !== dpr) { W = nw; H = nh; dpr = nd; [cv, base, tmpC].forEach((c) => { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }); [mc, bc, tc].forEach((c) => c.setTransform(dpr, 0, 0, dpr, 0, 0)); dirty = true; }
+      if (nw !== W || nh !== H || nd !== dpr) { W = nw; H = nh; dpr = nd; [cv, cvK, base, baseK, tA, tB].forEach((c) => { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }); [mc, kc, bc, bk2, ta, tb2].forEach((c) => c.setTransform(dpr, 0, 0, dpr, 0, 0)); dirty = true; }
       return true;
     }
     // прокрученный текст уходит под заголовок — рисунок вместе с ним
     const clip = (c) => { if (ed.scrollTop > 0) { c.beginPath(); c.rect(0, OY, W, H - OY); c.clip(); } };
-    function rebase() { const off = ed.scrollTop; bc.save(); bc.setTransform(1, 0, 0, 1, 0, 0); bc.clearRect(0, 0, base.width, base.height); bc.restore(); bc.save(); clip(bc); (p.ink || []).forEach((q) => inkStroke(bc, tc, q, W, H, off - OY)); bc.restore(); baseOff = off; dirty = false; }
+    function rebase(skip) {
+      const off = ed.scrollTop; tClear(bc); tClear(bk2); bc.save(); bk2.save(); clip(bc); clip(bk2);
+      inkRender(bc, bk2, ta, tb2, p.ink || [], W, H, off - OY, skip); bc.restore(); bk2.restore();
+      baseOff = off; dirty = false; baseSkip = skip ? [...skip].join(',') : '';
+    }
     function frame() {
       raf = 0; if (!W && !place()) return;
-      if (dirty || baseOff !== ed.scrollTop) rebase();
-      mc.save(); mc.setTransform(1, 0, 0, 1, 0, 0); mc.clearRect(0, 0, cv.width, cv.height); mc.drawImage(base, 0, 0); mc.restore();
-      if (cur && cur.p.length >= 2) { mc.save(); clip(mc); inkStroke(mc, tc, cur, W, H, ed.scrollTop - OY); mc.restore(); }
+      const ink = p.ink || [], run = cur && cur.b === 'marker' ? markerRun(ink, cur.c, cur.o) : null, key = run ? [...run].join(',') : '';
+      if (dirty || baseOff !== ed.scrollTop || baseSkip !== key) rebase(run);
+      tClear(mc); tClear(kc); mc.save(); mc.setTransform(1, 0, 0, 1, 0, 0); mc.drawImage(base, 0, 0); mc.restore(); kc.save(); kc.setTransform(1, 0, 0, 1, 0, 0); kc.drawImage(baseK, 0, 0); kc.restore();
+      if (!cur || cur.p.length < 2) return;
+      const off = ed.scrollTop - OY;
+      mc.save(); kc.save(); clip(mc); clip(kc);
+      if (cur.b === 'eraser') { inkErase(mc, cur, W, H, off); inkErase(kc, cur, W, H, off); }
+      else if (cur.b === 'marker') { tClear(ta); [...run].sort((x, y) => x - y).forEach((i) => inkShape(ta, ink[i], W, H, off)); inkShape(ta, cur, W, H, off); compose(kc, ta, cur.o); }
+      else { tClear(tb2); if (inkShape(tb2, cur, W, H, off)) compose(mc, tb2, cur.o); }
+      mc.restore(); kc.restore();
     }
     const redraw = (full) => { if (full) dirty = true; if (!raf) raf = requestAnimationFrame(frame); };
     const ro = window.ResizeObserver ? new ResizeObserver(() => { if (place()) redraw(true); }) : null; if (ro) { ro.observe(ed); ro.observe(host); }
@@ -138,6 +164,7 @@ var EkNotes = (function () {
     cv.addEventListener('pointerdown', (e) => {
       if (!cv.classList.contains('on') || (e.button && e.button !== 0)) return;
       e.preventDefault(); e.stopPropagation(); try { cv.setPointerCapture(e.pointerId); } catch (er) {}
+      ctl.down && ctl.down();
       ptrs.set(e.pointerId, [e.clientX, e.clientY]);
       if (ptrs.size >= 2) { cur = null; two = { y: [...ptrs.values()].reduce((s2, v) => s2 + v[1], 0) / ptrs.size, st: ed.scrollTop }; redraw(); return; }
       const st = ctl.state(), [x, y] = toN(e);
@@ -283,11 +310,12 @@ var EkNotes = (function () {
     // ---- рисование: своя панель вместо панели текста ----
     const IP = Object.assign({ b: 'pen', c: '#c0262d', w: {}, o: {}, rec: [] }, LSI.get('prefs', {}));
     Object.keys(BRUSH).forEach((k) => { if (!(IP.w[k] > 0)) IP.w[k] = BRUSH[k][2]; if (!(IP.o[k] > 0)) IP.o[k] = BRUSH[k][3]; });
-    if (!BRUSH[IP.b]) IP.b = 'pen'; if (!OKCOL.test(IP.c)) IP.c = '#c0262d';
+    if (!BRUSH[IP.b]) IP.b = 'pen'; if (!OKCOL.test(IP.c)) IP.c = '#c0262d'; if (!BRUSH[IP.lastB] || IP.lastB === 'eraser') IP.lastB = IP.b === 'eraser' ? 'pen' : IP.b;
     const saveIP = () => LSI.set('prefs', IP);
     let drawing = false, L = null;
     const HIST = new Map(); const hist = (p) => { if (!HIST.has(p.id)) HIST.set(p.id, { u: [], r: [] }); return HIST.get(p.id); };
     const ctlInk = {
+      down() { if (!pal.hidden) { pal.hidden = true; paintDraw(); } },
       state: () => ({ b: IP.b, c: IP.c, w: IP.w[IP.b], o: IP.o[IP.b] }),
       add(q) {
         const p = bk.pages[bk.at]; p.ink = p.ink || [];
@@ -297,30 +325,37 @@ var EkNotes = (function () {
     };
     const dtb = h('div', 'nb-tb nb-dtb'); dtb.hidden = true;
     const dbtn = (label, title, fn, cls) => { const b = h('button', 'nb-tl' + (cls ? ' ' + cls : ''), label); b.type = 'button'; b.title = title; b.addEventListener('pointerdown', (e) => e.preventDefault()); b.addEventListener('click', fn); dtb.appendChild(b); return b; };
-    const toDraw = tool('🖌', 'Рисовать поверх страницы', () => {}, 'dr');
+    const toDraw = tool('🖌', 'Рисовать поверх страницы (B)', () => {}, 'dr');
     toDraw.replaceWith(toDraw.cloneNode(true)); const drB = tb.querySelector('.nb-tl.dr'); drB.addEventListener('click', () => setDraw(true)); tb.insertBefore(drB, tb.firstChild);
-    dbtn('Aa', 'Вернуться к тексту', () => setDraw(false), 'dr on');
+    dbtn('Aa', 'Вернуться к тексту (Esc)', () => setDraw(false), 'dr on');
     dtb.appendChild(h('i', 'nb-sep'));
-    const bBtns = {}; Object.keys(BRUSH).forEach((k) => { bBtns[k] = dbtn(BRUSH[k][0], BRUSH[k][1] + (k === 'eraser' ? ' — стирает только рисунок' : ''), () => { IP.b = k; saveIP(); paintDraw(); }, 'br'); });
+    const bBtns = {}; Object.keys(BRUSH).forEach((k, i) => { bBtns[k] = dbtn(BRUSH[k][0], BRUSH[k][1] + (k === 'eraser' ? ' — стирает только рисунок (E)' : ' (' + (i + 1) + ')'), () => setBrush(k), 'br'); });
+    function setBrush(k) { if (!BRUSH[k]) return; if (k !== 'eraser') IP.lastB = k; IP.b = k; saveIP(); paintDraw(); }
     dtb.appendChild(h('i', 'nb-sep'));
-    const colB = dbtn('', 'Цвет', () => { pal.hidden = !pal.hidden; paintDraw(); }, 'col');
-    const sz = h('label', 'nb-rg'); sz.title = 'Толщина'; const szD = h('i', 'nb-dot'); const szR = h('input'); szR.type = 'range'; szR.min = 1; szR.max = 48; szR.step = 1; sz.append(szD, szR); dtb.appendChild(sz);
+    const colB = dbtn('', 'Цвет (C)', () => { pal.hidden = !pal.hidden; paintDraw(); }, 'col');
+    const sz = h('label', 'nb-rg'); sz.title = 'Толщина ([ и ])'; const szD = h('i', 'nb-dot'); const szR = h('input'); szR.type = 'range'; szR.min = 1; szR.max = 48; szR.step = 1; sz.append(szD, szR); dtb.appendChild(sz);
     szR.addEventListener('input', () => { IP.w[IP.b] = +szR.value; saveIP(); paintDraw(); });
-    const op = h('label', 'nb-rg'); op.title = 'Непрозрачность'; const opT = h('small', '', ''); const opR = h('input'); opR.type = 'range'; opR.min = 5; opR.max = 100; opR.step = 5; op.append(opT, opR); dtb.appendChild(op);
+    const op = h('label', 'nb-rg'); op.title = 'Непрозрачность (- и =)'; const opT = h('small', '', ''); const opR = h('input'); opR.type = 'range'; opR.min = 5; opR.max = 100; opR.step = 5; op.append(opT, opR); dtb.appendChild(op);
     opR.addEventListener('input', () => { IP.o[IP.b] = +opR.value; saveIP(); paintDraw(); });
     dtb.appendChild(h('i', 'nb-sep'));
-    const uB = dbtn('↶', 'Отменить штрих', () => inkUndo(), 'un'), rB = dbtn('↷', 'Вернуть штрих', () => inkRedo(), 'un');
+    const uB = dbtn('↶', 'Отменить штрих (Ctrl+Z)', () => inkUndo(), 'un'), rB = dbtn('↷', 'Вернуть штрих (Ctrl+Y или Ctrl+Shift+Z)', () => inkRedo(), 'un');
     const cB = dbtn('🗑', 'Стереть весь рисунок на странице', async () => { const p = bk.pages[bk.at]; if (!p.ink || !p.ink.length) return; if (!(await o.confirm('Стереть весь рисунок на этой странице? Текст останется. Вернуть можно кнопкой ↶.', { title: 'Рисунок', ok: 'Стереть' }))) return; const H = hist(p); H.u.push({ t: 'clear', list: p.ink }); H.r = []; p.ink = []; p.t = Date.now(); save(); if (L) L.redraw(true); paintDraw(); }, 'cl');
-    // палитра
+    // палитра: строится один раз — выбор цвета её не пересобирает (свой цвет не закрывается, меню не прыгает)
     const pal = h('div', 'nb-pal'); pal.hidden = true;
-    function paintPal() {
-      pal.innerHTML = '';
-      const g = h('div', 'nb-pg'); PALETTE.forEach((c) => { const b = h('button', c.toLowerCase() === IP.c.toLowerCase() ? 'on' : ''); b.type = 'button'; b.style.background = c; b.title = c; b.addEventListener('click', () => pick(c)); g.appendChild(b); }); pal.appendChild(g);
-      const row = h('div', 'nb-pr'); const own = h('label', 'nb-own'); own.appendChild(h('span', '', 'Свой цвет')); const ci = h('input'); ci.type = 'color'; ci.value = IP.c; ci.addEventListener('input', () => pick(ci.value, true)); ci.addEventListener('change', () => pick(ci.value)); own.appendChild(ci); row.appendChild(own);
-      if (IP.rec.length) { row.appendChild(h('small', '', 'Недавние:')); IP.rec.forEach((c) => { const b = h('button', 'rec'); b.type = 'button'; b.style.background = c; b.addEventListener('click', () => pick(c)); row.appendChild(b); }); }
-      pal.appendChild(row);
-    }
-    function pick(c, live) { if (!OKCOL.test(c)) return; IP.c = c.toLowerCase(); if (IP.b === 'eraser') IP.b = 'pen'; if (!live) { IP.rec = [IP.c].concat(IP.rec.filter((x) => x !== IP.c)).slice(0, 8); pal.hidden = true; } saveIP(); paintDraw(); }
+    const pg2 = h('div', 'nb-pg'), sw = {};
+    PALETTE.forEach((c) => { const b = h('button'); b.type = 'button'; b.style.background = c; b.title = c; b.addEventListener('click', () => { pick(c); pal.hidden = true; paintDraw(); }); pg2.appendChild(b); sw[c.toLowerCase()] = b; });
+    const prow = h('div', 'nb-pr'), own = h('label', 'nb-own'), ci = h('input'); ci.type = 'color';
+    own.append(h('span', '', 'Свой цвет'), ci);
+    const recBox = h('span', 'nb-recs');
+    const closeP = h('button', 'nb-tl nb-pclose', 'Готово'); closeP.type = 'button'; closeP.addEventListener('click', () => { pal.hidden = true; paintDraw(); });
+    prow.append(own, recBox, closeP); pal.append(pg2, prow);
+    ci.addEventListener('input', () => pick(ci.value));
+    ci.addEventListener('change', () => { pick(ci.value); addRec(IP.c); });
+    function addRec(c) { IP.rec = [c].concat(IP.rec.filter((x) => x !== c)).slice(0, 8); saveIP(); paintRec(); }
+    function paintRec() { recBox.innerHTML = ''; if (!IP.rec.length) return; recBox.appendChild(h('small', '', 'Недавние:')); IP.rec.forEach((c) => { const b = h('button', 'rec'); b.type = 'button'; b.style.background = c; b.title = c; b.addEventListener('click', () => pick(c)); recBox.appendChild(b); }); }
+    function paintPal() { Object.keys(sw).forEach((c) => sw[c].classList.toggle('on', c === IP.c)); if (document.activeElement !== ci) ci.value = IP.c; }
+    function pick(c) { if (!OKCOL.test(c)) return; IP.c = c.toLowerCase(); if (IP.b === 'eraser') IP.b = IP.lastB || 'pen'; if (!PALETTE.some((x) => x.toLowerCase() === IP.c) && !IP.rec.includes(IP.c)) {} saveIP(); paintDraw(); }
+    paintRec();
     const flashEl = h('div', 'nb-flash'); let flT = 0; function flash(t) { flashEl.textContent = t; flashEl.classList.add('on'); clearTimeout(flT); flT = setTimeout(() => flashEl.classList.remove('on'), 2600); }
     function inkUndo() { const p = bk.pages[bk.at], H = hist(p); const a = H.u.pop(); if (a && a.t === 'clear') { H.r.push({ t: 'clear', list: a.list }); p.ink = a.list; } else if (p.ink && p.ink.length) { H.r.push({ t: 'add', s: p.ink.pop() }); } else return; p.t = Date.now(); save(); if (L) L.redraw(true); paintDraw(); }
     function inkRedo() { const p = bk.pages[bk.at], H = hist(p); const a = H.r.pop(); if (!a) return; if (a.t === 'add') { p.ink = p.ink || []; p.ink.push(a.s); H.u.push({ t: 'add' }); } else { H.u.push({ t: 'clear', list: p.ink || [] }); p.ink = []; } p.t = Date.now(); save(); if (L) L.redraw(true); paintDraw(); }
@@ -332,14 +367,40 @@ var EkNotes = (function () {
       const d = Math.max(3, Math.min(26, IP.w[IP.b])); szD.style.width = szD.style.height = d + 'px'; szD.style.background = IP.b === 'eraser' ? 'transparent' : IP.c; szD.style.opacity = IP.b === 'eraser' ? 1 : IP.o[IP.b] / 100;
       uB.disabled = !(H.u.length || (p && p.ink && p.ink.length)); rB.disabled = !H.r.length; cB.disabled = !(p && p.ink && p.ink.length);
       if (!pal.hidden) paintPal();
+      colB.classList.toggle('on', !pal.hidden);
     }
     function setDraw(on) {
-      drawing = !!on; tb.hidden = drawing; dtb.hidden = !drawing; pal.hidden = true; wrap.classList.toggle('drawing', drawing);
+      drawing = !!on; tb.hidden = drawing; dtb.hidden = !drawing; pal.hidden = true; keys.hidden = !drawing || !matchMedia('(hover: hover)').matches; wrap.classList.toggle('drawing', drawing);
       if (drawing && document.activeElement && page.contains(document.activeElement)) document.activeElement.blur();
       if (L) L.setMode(drawing); paintDraw();
     }
-    B.appendChild(tb); B.appendChild(dtb); B.appendChild(pal); B.appendChild(flashEl);
-    B.addEventListener('keydown', (e) => { if (!drawing || !(e.ctrlKey || e.metaKey)) return; const k = e.key.toLowerCase(); if (k === 'z' && !e.shiftKey) { e.preventDefault(); inkUndo(); } else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); inkRedo(); } });
+    const keys = h('p', 'nb-keys', 'Клавиши: Ctrl+Z — отменить · Ctrl+Y — вернуть · 1–6 — кисти · E — ластик · [ ] — толщина · − = — прозрачность · C — палитра · Esc или B — к тексту'); keys.hidden = true;
+    B.appendChild(tb); B.appendChild(dtb); B.appendChild(pal); B.appendChild(keys); B.appendChild(flashEl);
+    // горячие клавиши (по физическим клавишам — работают и в русской раскладке)
+    const typing = () => { const a = document.activeElement; return a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) && a.type !== 'range' && a.type !== 'color'; };
+    const onKey = (e) => {
+      if (!tb.isConnected) { window.removeEventListener('keydown', onKey, true); return; }
+      if (!wrap.offsetParent) return;
+      const c = e.code, mod = e.ctrlKey || e.metaKey;
+      let done = true;
+      if (drawing) {
+        if (mod && c === 'KeyZ' && !e.shiftKey) inkUndo();
+        else if (mod && (c === 'KeyY' || (c === 'KeyZ' && e.shiftKey))) inkRedo();
+        else if (mod || e.altKey) done = false;
+        else if (c === 'Escape') { if (!pal.hidden) { pal.hidden = true; paintDraw(); } else setDraw(false); }
+        else if (typing()) done = false;
+        else if (/^Digit[1-6]$/.test(c)) setBrush(Object.keys(BRUSH)[+c.slice(5) - 1]);
+        else if (c === 'KeyE' || c === 'Digit0') setBrush('eraser');
+        else if (c === 'KeyC') { pal.hidden = !pal.hidden; paintDraw(); }
+        else if (c === 'BracketLeft' || c === 'BracketRight') { IP.w[IP.b] = Math.max(1, Math.min(48, IP.w[IP.b] + (c === 'BracketRight' ? 1 : -1) * (e.shiftKey ? 5 : 1))); saveIP(); paintDraw(); }
+        else if (c === 'Minus' || c === 'Equal') { if (IP.b !== 'eraser') { IP.o[IP.b] = Math.max(5, Math.min(100, IP.o[IP.b] + (c === 'Equal' ? 5 : -5))); saveIP(); paintDraw(); } }
+        else if (c === 'KeyB') setDraw(false);
+        else done = false;
+      } else if (!typing() && !mod && !e.altKey && c === 'KeyB') setDraw(true);
+      else done = false;
+      if (done) { e.preventDefault(); e.stopImmediatePropagation(); }
+    };
+    window.addEventListener('keydown', onKey, true);
     const wrap = h('div', 'nb-wrap'); if (o.color) wrap.style.setProperty('--pc', o.color);
     const cover = h('div', 'nb-cover');
     const rings = h('div', 'nb-rings'); for (let i = 0; i < 11; i++) rings.appendChild(h('i'));
