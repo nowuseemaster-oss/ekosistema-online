@@ -1090,7 +1090,7 @@
     if (NT.st !== 'on') B.appendChild(mkEl('p', 'nt-warn', NT.st === 'nosql' ? 'Заметки в облаке ещё не включены (Мастеру нужно запустить файл 03_zametki.sql). Пока блокнот хранится только на этом устройстве, а общей доски нет.' : 'Нет связи с заметками: ' + NT.err));
     const me = myHero();
     if (NT.tab === 'book') {
-      NT.ctl = EkNotes.mountBook(B, { book: NT.book, color: heroCol(me), confirm: ntAsk, prompt: (t, v) => Promise.resolve(window.prompt(t, v)), hint: 'Личные блокноты: их видишь только ты (и Мастер). Выдели слова — и маркер, подчёркивание, цвет. Сохраняется само.', onChange: bookChanged });
+      NT.ctl = EkNotes.mountBook(B, { book: NT.book, color: heroCol(me), confirm: ntAsk, prompt: (t, v) => Promise.resolve(window.prompt(t, v)), hint: 'Личные блокноты: их видишь только ты (и Мастер). Выдели слова — маркер, подчёркивание, цвет. 🖌 — рисовать поверх страницы (двумя пальцами — листать текст). Сохраняется само.', onChange: bookChanged });
       return;
     }
     if (NT.st !== 'on') return;

@@ -49,6 +49,122 @@ var EkNotes = (function () {
     ops.tadd.forEach((t) => { if (!D.threads.some((q) => tk(q) === tk(t))) D.threads.push(clone(t)); });
     return fixBoard(D);
   }
+  // ---------- рисунок поверх страницы ----------
+  //  Штрих: { b: кисть, c: цвет, w: толщина (доли ширины страницы ×10000), o: непрозрачность 0–100, p: [x0, y0, dx, dy, …] в долях ширины ×2000 }.
+  //  Слой лежит над текстом и прокручивается вместе с ним; ластик стирает только рисунок.
+  const PALETTE = ['#111111', '#444444', '#888888', '#c8c8c8', '#ffffff', '#f3ecdc', '#5a0610', '#c0262d', '#ff3a46', '#ff8a96', '#ffc2d1', '#d81b60',
+    '#e65100', '#ff8a1e', '#ffb74d', '#ffd54f', '#fff176', '#c9a227', '#1b5e20', '#2e7d32', '#43a047', '#9ccc65', '#26a69a', '#00838f',
+    '#0d47a1', '#1f4fb0', '#42a5f5', '#90caf9', '#311b92', '#5e35b1', '#9575cd', '#ce93d8', '#3e2723', '#6d4c41', '#a1887f', '#d7b899'];
+  const BRUSH = { pen: ['✒', 'Ручка', 4, 100], pencil: ['✏', 'Карандаш', 3, 85], marker: ['▮', 'Маркер', 18, 45], brush: ['🖌', 'Кисть', 10, 95], neon: ['✦', 'Неон', 6, 100], spray: ['∴', 'Баллончик', 16, 80], eraser: ['◌', 'Ластик', 24, 100] };
+  const OKCOL = /^#[0-9a-f]{6}$/i;
+  const seeded = (n) => { let x = (n | 0) * 2654435761 >>> 0 || 1; return () => { x ^= x << 13; x >>>= 0; x ^= x >> 17; x ^= x << 5; x >>>= 0; return x / 4294967296; }; };
+  const LSI = { get(k, d) { try { const v = localStorage.getItem('ek_ink_' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem('ek_ink_' + k, JSON.stringify(v)); } catch (e) {} } };
+  function inkFix(a) {
+    return (Array.isArray(a) ? a : []).filter((q) => q && BRUSH[q.b] && Array.isArray(q.p) && q.p.length >= 2 && q.p.length <= 40000).slice(0, 3000).map((q) => ({
+      b: q.b, c: OKCOL.test(q.c) ? q.c : '#111111', w: Math.max(1, Math.min(2000, q.w | 0)), o: Math.max(5, Math.min(100, q.o | 0)), p: q.p.map((v) => v | 0) }));
+  }
+  function inkPts(q, W, offY) { const k = W / 2000, a = q.p, out = []; let x = 0, y = 0; for (let i = 0; i + 1 < a.length; i += 2) { x += a[i]; y += a[i + 1]; out.push([x * k, y * k - offY]); } return out; }
+  function inkPath(c, P) {
+    c.beginPath(); c.moveTo(P[0][0], P[0][1]);
+    if (P.length === 1) { c.lineTo(P[0][0] + 0.01, P[0][1]); return; }
+    for (let i = 1; i < P.length - 1; i++) c.quadraticCurveTo(P[i][0], P[i][1], (P[i][0] + P[i + 1][0]) / 2, (P[i][1] + P[i + 1][1]) / 2);
+    c.lineTo(P[P.length - 1][0], P[P.length - 1][1]);
+  }
+  // один штрих: сперва во вспомогательный холст целиком, потом — с нужной прозрачностью (без потемнений на самопересечениях)
+  function inkStroke(main, tmp, q, W, H, offY) {
+    const P = inkPts(q, W, offY); if (!P.length) return;
+    const w = Math.max(0.6, q.w * W / 10000);
+    let y0 = Infinity, y1 = -Infinity; P.forEach((pt) => { if (pt[1] < y0) y0 = pt[1]; if (pt[1] > y1) y1 = pt[1]; });
+    if (y1 < -w * 3 || y0 > H + w * 3) return;
+    if (q.b === 'eraser') { main.save(); main.globalCompositeOperation = 'destination-out'; main.lineCap = main.lineJoin = 'round'; main.lineWidth = w; main.strokeStyle = '#000'; inkPath(main, P); main.stroke(); main.restore(); return; }
+    const t = tmp; t.save(); t.setTransform(1, 0, 0, 1, 0, 0); t.clearRect(0, 0, t.canvas.width, t.canvas.height); t.restore();
+    t.save(); t.lineCap = t.lineJoin = 'round'; t.strokeStyle = t.fillStyle = q.c;
+    const rnd = seeded(q.p.length * 31 + q.p[0] * 7 + q.p[1]);
+    if (q.b === 'pen') { t.lineWidth = w; inkPath(t, P); t.stroke(); }
+    else if (q.b === 'marker') { t.lineCap = 'square'; t.lineWidth = w; inkPath(t, P); t.stroke(); }
+    else if (q.b === 'pencil') { t.lineWidth = Math.max(0.7, w * 0.55); for (let k = 0; k < 3; k++) { t.globalAlpha = 0.55; t.save(); t.translate((rnd() - 0.5) * w * 0.5, (rnd() - 0.5) * w * 0.5); inkPath(t, P); t.stroke(); t.restore(); } t.globalAlpha = 1; for (let i = 0; i < P.length; i++) if (rnd() < 0.5) { t.globalAlpha = 0.35; t.fillRect(P[i][0] + (rnd() - 0.5) * w, P[i][1] + (rnd() - 0.5) * w, 0.8, 0.8); } }
+    else if (q.b === 'brush') {
+      let pw = w;
+      for (let i = 0; i < P.length; i++) {
+        const a = P[Math.max(0, i - 1)], b = P[i], d = Math.hypot(b[0] - a[0], b[1] - a[1]), tw = w * Math.max(0.35, Math.min(1.25, 1.25 - d / (w * 2.5)));
+        const steps = Math.max(1, Math.ceil(d / Math.max(0.6, w * 0.18)));
+        for (let s2 = 1; s2 <= steps; s2++) { const u = s2 / steps, r = (pw + (tw - pw) * u) / 2; t.beginPath(); t.arc(a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, r, 0, Math.PI * 2); t.fill(); }
+        if (i === 0) { t.beginPath(); t.arc(b[0], b[1], tw / 2, 0, Math.PI * 2); t.fill(); }
+        pw = pw + (tw - pw) * 0.6;
+      }
+    }
+    else if (q.b === 'neon') { t.shadowColor = q.c; t.shadowBlur = w * 2.4; t.lineWidth = w; inkPath(t, P); t.stroke(); t.stroke(); t.shadowBlur = 0; t.strokeStyle = 'rgba(255,255,255,.85)'; t.lineWidth = Math.max(0.6, w * 0.32); inkPath(t, P); t.stroke(); }
+    else if (q.b === 'spray') {
+      for (let i = 0; i < P.length; i++) {
+        const a = P[Math.max(0, i - 1)], b = P[i], d = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(4, Math.round((d / Math.max(1, w * 0.3) + 1) * w * 0.5));
+        for (let k = 0; k < n; k++) { const u = rnd(), an = rnd() * Math.PI * 2, rr = Math.sqrt(rnd()) * w; t.fillRect(a[0] + (b[0] - a[0]) * u + Math.cos(an) * rr, a[1] + (b[1] - a[1]) * u + Math.sin(an) * rr, 1.1, 1.1); }
+      }
+    }
+    t.restore();
+    main.save(); main.globalAlpha = q.o / 100; main.setTransform(1, 0, 0, 1, 0, 0); main.drawImage(t.canvas, 0, 0); main.restore();
+  }
+  // слой рисунка над текстом страницы
+  function inkLayer(host, ed, p, live, ctl) {
+    const cv = h('canvas', 'nb-ink'), base = document.createElement('canvas'), tmpC = document.createElement('canvas');
+    const mc = cv.getContext('2d'), bc = base.getContext('2d'), tc = tmpC.getContext('2d');
+    host.appendChild(cv);
+    let W = 0, H = 0, OY = 0, dpr = 1, cur = null, raf = 0, baseOff = -1, dirty = true;
+    function place() {
+      // слой — на всю страницу (заголовок и поля тоже), отсчёт — от начала текста
+      const nw = ed.offsetWidth, nh = host.clientHeight; if (!nw || !nh) return false;
+      if (OY !== ed.offsetTop) { OY = ed.offsetTop; dirty = true; }
+      cv.style.left = ed.offsetLeft + 'px'; cv.style.top = '0px'; cv.style.width = nw + 'px'; cv.style.height = nh + 'px';
+      const nd = Math.min(2, window.devicePixelRatio || 1);
+      if (nw !== W || nh !== H || nd !== dpr) { W = nw; H = nh; dpr = nd; [cv, base, tmpC].forEach((c) => { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }); [mc, bc, tc].forEach((c) => c.setTransform(dpr, 0, 0, dpr, 0, 0)); dirty = true; }
+      return true;
+    }
+    // прокрученный текст уходит под заголовок — рисунок вместе с ним
+    const clip = (c) => { if (ed.scrollTop > 0) { c.beginPath(); c.rect(0, OY, W, H - OY); c.clip(); } };
+    function rebase() { const off = ed.scrollTop; bc.save(); bc.setTransform(1, 0, 0, 1, 0, 0); bc.clearRect(0, 0, base.width, base.height); bc.restore(); bc.save(); clip(bc); (p.ink || []).forEach((q) => inkStroke(bc, tc, q, W, H, off - OY)); bc.restore(); baseOff = off; dirty = false; }
+    function frame() {
+      raf = 0; if (!W && !place()) return;
+      if (dirty || baseOff !== ed.scrollTop) rebase();
+      mc.save(); mc.setTransform(1, 0, 0, 1, 0, 0); mc.clearRect(0, 0, cv.width, cv.height); mc.drawImage(base, 0, 0); mc.restore();
+      if (cur && cur.p.length >= 2) { mc.save(); clip(mc); inkStroke(mc, tc, cur, W, H, ed.scrollTop - OY); mc.restore(); }
+    }
+    const redraw = (full) => { if (full) dirty = true; if (!raf) raf = requestAnimationFrame(frame); };
+    const ro = window.ResizeObserver ? new ResizeObserver(() => { if (place()) redraw(true); }) : null; if (ro) { ro.observe(ed); ro.observe(host); }
+    ed.addEventListener('scroll', () => redraw());
+    requestAnimationFrame(() => { place(); redraw(true); });
+    if (!live) return { redraw, setMode() {}, cv };
+    // ввод: одним пальцем/пером/мышью — рисовать; двумя пальцами — листать страницу
+    const ptrs = new Map(); let lastX = 0, lastY = 0, two = null;
+    const toN = (e) => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / W * 2000, (e.clientY - r.top - OY + ed.scrollTop) / W * 2000]; };
+    cv.addEventListener('pointerdown', (e) => {
+      if (!cv.classList.contains('on') || (e.button && e.button !== 0)) return;
+      e.preventDefault(); e.stopPropagation(); try { cv.setPointerCapture(e.pointerId); } catch (er) {}
+      ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+      if (ptrs.size >= 2) { cur = null; two = { y: [...ptrs.values()].reduce((s2, v) => s2 + v[1], 0) / ptrs.size, st: ed.scrollTop }; redraw(); return; }
+      const st = ctl.state(), [x, y] = toN(e);
+      cur = { b: st.b, c: st.c, w: Math.max(1, Math.round(st.w / W * 10000)), o: st.b === 'eraser' ? 100 : st.o, p: [Math.round(x), Math.round(y)] };
+      lastX = Math.round(x); lastY = Math.round(y); redraw();
+    });
+    cv.addEventListener('pointermove', (e) => {
+      if (!ptrs.has(e.pointerId)) return;
+      ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+      if (two) { const y = [...ptrs.values()].reduce((s2, v) => s2 + v[1], 0) / ptrs.size; ed.scrollTop = two.st - (y - two.y); return; }
+      if (!cur) return;
+      const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+      (evs.length ? evs : [e]).forEach((ev) => { const [x, y] = toN(ev), X = Math.round(x), Y = Math.round(y); if (Math.hypot(X - lastX, Y - lastY) * W / 2000 < 1.2) return; cur.p.push(X - lastX, Y - lastY); lastX = X; lastY = Y; });
+      redraw();
+    });
+    const up = (e) => {
+      if (!ptrs.has(e.pointerId)) return; ptrs.delete(e.pointerId);
+      if (ptrs.size) return;
+      if (two) { two = null; return; }
+      const q = cur; cur = null; if (!q) return;
+      if (q.p.length === 2) q.p.push(1, 0);   // точка
+      if (!ctl.add(q)) { redraw(); return; }
+      redraw(true);
+    };
+    cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+    return { redraw, cv, setMode(on) { cv.classList.toggle('on', !!on); } };
+  }
   // ---------- блокнот ----------
   //  Полка: { books: [{ id, name, c, pages: [{ id, ti, html, tx, t }], at }], cur }.
   //  Старый формат { pages, at } (простой текст) переносится в первый блокнот сам.
@@ -86,7 +202,7 @@ var EkNotes = (function () {
     S.books.forEach((b) => {
       b.id = String(b.id || uid()); b.name = String(b.name || 'Блокнот').slice(0, 40); if (!COVER[b.c]) b.c = 'r';
       b.pages = (Array.isArray(b.pages) ? b.pages : []).filter((p) => p && typeof p === 'object').slice(0, 300);
-      b.pages.forEach((p) => { p.id = String(p.id || uid()); p.ti = String(p.ti || '').slice(0, 80); if (p.html == null) p.html = txt2html(p.tx); p.t = +p.t || Date.now(); });
+      b.pages.forEach((p) => { p.id = String(p.id || uid()); p.ti = String(p.ti || '').slice(0, 80); if (p.html == null) p.html = txt2html(p.tx); p.t = +p.t || Date.now(); if (p.ink != null) { p.ink = inkFix(p.ink); if (!p.ink.length) delete p.ink; } });
       if (!b.pages.length) b.pages.push({ id: uid(), ti: '', html: '', tx: '', t: Date.now() });
       b.at = Math.max(0, Math.min(b.pages.length - 1, b.at | 0));
     });
@@ -164,7 +280,66 @@ var EkNotes = (function () {
     function hexRgb(x) { const n = parseInt(x.slice(1), 16); return 'rgb(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ')'; }
     function paintState() { try { [[tB, 'bold'], [tI, 'italic'], [tU, 'underline'], [tS, 'strikeThrough']].forEach(([b, c]) => b.classList.toggle('on', !!document.queryCommandState(c))); } catch (e) {} }
     document.addEventListener('selectionchange', () => { if (tb.isConnected && edEl && document.activeElement === edEl) paintState(); });
-    B.appendChild(tb);
+    // ---- рисование: своя панель вместо панели текста ----
+    const IP = Object.assign({ b: 'pen', c: '#c0262d', w: {}, o: {}, rec: [] }, LSI.get('prefs', {}));
+    Object.keys(BRUSH).forEach((k) => { if (!(IP.w[k] > 0)) IP.w[k] = BRUSH[k][2]; if (!(IP.o[k] > 0)) IP.o[k] = BRUSH[k][3]; });
+    if (!BRUSH[IP.b]) IP.b = 'pen'; if (!OKCOL.test(IP.c)) IP.c = '#c0262d';
+    const saveIP = () => LSI.set('prefs', IP);
+    let drawing = false, L = null;
+    const HIST = new Map(); const hist = (p) => { if (!HIST.has(p.id)) HIST.set(p.id, { u: [], r: [] }); return HIST.get(p.id); };
+    const ctlInk = {
+      state: () => ({ b: IP.b, c: IP.c, w: IP.w[IP.b], o: IP.o[IP.b] }),
+      add(q) {
+        const p = bk.pages[bk.at]; p.ink = p.ink || [];
+        if (JSON.stringify(p.ink).length > 220000) { flash('Страница уже сплошь изрисована — начни новую'); return false; }
+        p.ink.push(q); const H = hist(p); H.u.push({ t: 'add' }); H.r = []; p.t = Date.now(); save(); paintDraw(); return true;
+      }
+    };
+    const dtb = h('div', 'nb-tb nb-dtb'); dtb.hidden = true;
+    const dbtn = (label, title, fn, cls) => { const b = h('button', 'nb-tl' + (cls ? ' ' + cls : ''), label); b.type = 'button'; b.title = title; b.addEventListener('pointerdown', (e) => e.preventDefault()); b.addEventListener('click', fn); dtb.appendChild(b); return b; };
+    const toDraw = tool('🖌', 'Рисовать поверх страницы', () => {}, 'dr');
+    toDraw.replaceWith(toDraw.cloneNode(true)); const drB = tb.querySelector('.nb-tl.dr'); drB.addEventListener('click', () => setDraw(true)); tb.insertBefore(drB, tb.firstChild);
+    dbtn('Aa', 'Вернуться к тексту', () => setDraw(false), 'dr on');
+    dtb.appendChild(h('i', 'nb-sep'));
+    const bBtns = {}; Object.keys(BRUSH).forEach((k) => { bBtns[k] = dbtn(BRUSH[k][0], BRUSH[k][1] + (k === 'eraser' ? ' — стирает только рисунок' : ''), () => { IP.b = k; saveIP(); paintDraw(); }, 'br'); });
+    dtb.appendChild(h('i', 'nb-sep'));
+    const colB = dbtn('', 'Цвет', () => { pal.hidden = !pal.hidden; paintDraw(); }, 'col');
+    const sz = h('label', 'nb-rg'); sz.title = 'Толщина'; const szD = h('i', 'nb-dot'); const szR = h('input'); szR.type = 'range'; szR.min = 1; szR.max = 48; szR.step = 1; sz.append(szD, szR); dtb.appendChild(sz);
+    szR.addEventListener('input', () => { IP.w[IP.b] = +szR.value; saveIP(); paintDraw(); });
+    const op = h('label', 'nb-rg'); op.title = 'Непрозрачность'; const opT = h('small', '', ''); const opR = h('input'); opR.type = 'range'; opR.min = 5; opR.max = 100; opR.step = 5; op.append(opT, opR); dtb.appendChild(op);
+    opR.addEventListener('input', () => { IP.o[IP.b] = +opR.value; saveIP(); paintDraw(); });
+    dtb.appendChild(h('i', 'nb-sep'));
+    const uB = dbtn('↶', 'Отменить штрих', () => inkUndo(), 'un'), rB = dbtn('↷', 'Вернуть штрих', () => inkRedo(), 'un');
+    const cB = dbtn('🗑', 'Стереть весь рисунок на странице', async () => { const p = bk.pages[bk.at]; if (!p.ink || !p.ink.length) return; if (!(await o.confirm('Стереть весь рисунок на этой странице? Текст останется. Вернуть можно кнопкой ↶.', { title: 'Рисунок', ok: 'Стереть' }))) return; const H = hist(p); H.u.push({ t: 'clear', list: p.ink }); H.r = []; p.ink = []; p.t = Date.now(); save(); if (L) L.redraw(true); paintDraw(); }, 'cl');
+    // палитра
+    const pal = h('div', 'nb-pal'); pal.hidden = true;
+    function paintPal() {
+      pal.innerHTML = '';
+      const g = h('div', 'nb-pg'); PALETTE.forEach((c) => { const b = h('button', c.toLowerCase() === IP.c.toLowerCase() ? 'on' : ''); b.type = 'button'; b.style.background = c; b.title = c; b.addEventListener('click', () => pick(c)); g.appendChild(b); }); pal.appendChild(g);
+      const row = h('div', 'nb-pr'); const own = h('label', 'nb-own'); own.appendChild(h('span', '', 'Свой цвет')); const ci = h('input'); ci.type = 'color'; ci.value = IP.c; ci.addEventListener('input', () => pick(ci.value, true)); ci.addEventListener('change', () => pick(ci.value)); own.appendChild(ci); row.appendChild(own);
+      if (IP.rec.length) { row.appendChild(h('small', '', 'Недавние:')); IP.rec.forEach((c) => { const b = h('button', 'rec'); b.type = 'button'; b.style.background = c; b.addEventListener('click', () => pick(c)); row.appendChild(b); }); }
+      pal.appendChild(row);
+    }
+    function pick(c, live) { if (!OKCOL.test(c)) return; IP.c = c.toLowerCase(); if (IP.b === 'eraser') IP.b = 'pen'; if (!live) { IP.rec = [IP.c].concat(IP.rec.filter((x) => x !== IP.c)).slice(0, 8); pal.hidden = true; } saveIP(); paintDraw(); }
+    const flashEl = h('div', 'nb-flash'); let flT = 0; function flash(t) { flashEl.textContent = t; flashEl.classList.add('on'); clearTimeout(flT); flT = setTimeout(() => flashEl.classList.remove('on'), 2600); }
+    function inkUndo() { const p = bk.pages[bk.at], H = hist(p); const a = H.u.pop(); if (a && a.t === 'clear') { H.r.push({ t: 'clear', list: a.list }); p.ink = a.list; } else if (p.ink && p.ink.length) { H.r.push({ t: 'add', s: p.ink.pop() }); } else return; p.t = Date.now(); save(); if (L) L.redraw(true); paintDraw(); }
+    function inkRedo() { const p = bk.pages[bk.at], H = hist(p); const a = H.r.pop(); if (!a) return; if (a.t === 'add') { p.ink = p.ink || []; p.ink.push(a.s); H.u.push({ t: 'add' }); } else { H.u.push({ t: 'clear', list: p.ink || [] }); p.ink = []; } p.t = Date.now(); save(); if (L) L.redraw(true); paintDraw(); }
+    function paintDraw() {
+      const p = bk && bk.pages[bk.at], H = p ? hist(p) : { u: [], r: [] };
+      Object.keys(bBtns).forEach((k) => bBtns[k].classList.toggle('on', IP.b === k));
+      colB.style.setProperty('--ic', IP.c); colB.classList.toggle('dim', IP.b === 'eraser');
+      szR.value = IP.w[IP.b]; opR.value = IP.o[IP.b]; opR.disabled = IP.b === 'eraser'; opT.textContent = (IP.b === 'eraser' ? 100 : IP.o[IP.b]) + '%';
+      const d = Math.max(3, Math.min(26, IP.w[IP.b])); szD.style.width = szD.style.height = d + 'px'; szD.style.background = IP.b === 'eraser' ? 'transparent' : IP.c; szD.style.opacity = IP.b === 'eraser' ? 1 : IP.o[IP.b] / 100;
+      uB.disabled = !(H.u.length || (p && p.ink && p.ink.length)); rB.disabled = !H.r.length; cB.disabled = !(p && p.ink && p.ink.length);
+      if (!pal.hidden) paintPal();
+    }
+    function setDraw(on) {
+      drawing = !!on; tb.hidden = drawing; dtb.hidden = !drawing; pal.hidden = true; wrap.classList.toggle('drawing', drawing);
+      if (drawing && document.activeElement && page.contains(document.activeElement)) document.activeElement.blur();
+      if (L) L.setMode(drawing); paintDraw();
+    }
+    B.appendChild(tb); B.appendChild(dtb); B.appendChild(pal); B.appendChild(flashEl);
+    B.addEventListener('keydown', (e) => { if (!drawing || !(e.ctrlKey || e.metaKey)) return; const k = e.key.toLowerCase(); if (k === 'z' && !e.shiftKey) { e.preventDefault(); inkUndo(); } else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); inkRedo(); } });
     const wrap = h('div', 'nb-wrap'); if (o.color) wrap.style.setProperty('--pc', o.color);
     const cover = h('div', 'nb-cover');
     const rings = h('div', 'nb-rings'); for (let i = 0; i < 11; i++) rings.appendChild(h('i'));
@@ -176,23 +351,24 @@ var EkNotes = (function () {
     prev.title = 'Предыдущая страница'; nx.title = 'Следующая страница'; del.title = 'Вырвать страницу';
     nav.append(prev, num, nx, add, del); B.appendChild(nav);
     if (o.hint) B.appendChild(h('p', 'nb-hint', o.hint));
-    const empty = (p) => !p.ti && !(p.html || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, '').trim();
+    const empty = (p) => !p.ti && !(p.ink && p.ink.length) && !(p.html || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, '').trim();
     function fill(el, p, i, live) {
       el.innerHTML = '';
       const hd = h('div', 'nb-ph'), ti = h('input', 'nb-ti'); ti.placeholder = 'Без названия'; ti.maxLength = 80; ti.value = p.ti || '';
       hd.append(ti, h('small', 'nb-date', fmtD(p.t)));
       const tx = h('div', 'nb-tx nb-ed'); tx.contentEditable = live ? 'true' : 'false'; tx.spellcheck = false; tx.innerHTML = clean(p.html); tx.dataset.ph = i === 0 && empty(p) ? 'Пиши здесь — всё сохранится само…' : '';
       el.append(hd, tx, h('div', 'nb-pf', '— ' + (i + 1) + ' —'));
+      const ly = inkLayer(el, tx, p, live, ctlInk);
       const curl = h('button', 'nb-curl'); curl.type = 'button'; curl.title = i < bk.pages.length - 1 ? 'Перевернуть страницу' : 'Новая страница'; el.appendChild(curl);
       curl.addEventListener('click', () => (i < bk.pages.length - 1 ? turn(1) : newPage()));
-      if (!live) return { ti, tx };
+      if (!live) return { ti, tx, ly };
       ti.addEventListener('input', () => { p.ti = ti.value; p.t = Date.now(); save(); });
       tx.addEventListener('input', () => { p.html = clean(tx.innerHTML); p.tx = tx.innerText.slice(0, 40000); p.t = Date.now(); tx.dataset.ph = ''; save(); });
       // вставка — только текстом, без чужого оформления
       tx.addEventListener('paste', (e) => { const t = e.clipboardData && e.clipboardData.getData('text/plain'); if (t == null) return; e.preventDefault(); try { document.execCommand('insertText', false, t); } catch (er) {} });
       tx.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && !e.shiftKey && /^[biu]$/i.test(e.key)) { e.preventDefault(); run(ex({ b: 'bold', i: 'italic', u: 'underline' }[e.key.toLowerCase()])); } });
-      edEl = tx; saved = null;
-      return { ti, tx };
+      edEl = tx; saved = null; L = ly; ly.setMode(drawing);
+      return { ti, tx, ly };
     }
     let F = null;
     function show() {
@@ -201,6 +377,7 @@ var EkNotes = (function () {
       num.textContent = 'стр. ' + (bk.at + 1) + ' из ' + bk.pages.length;
       prev.disabled = bk.at <= 0; nx.disabled = bk.at >= bk.pages.length - 1; del.disabled = bk.pages.length <= 1 && empty(p);
       stack.style.setProperty('--n', Math.min(6, bk.pages.length - 1 - bk.at));
+      paintDraw();
     }
     let busy = false;
     function turn(d, target) {
@@ -226,10 +403,10 @@ var EkNotes = (function () {
     });
     wrap.addEventListener('pointerdown', (e) => e.stopPropagation());
     const inText = (t) => t.closest && t.closest('.nb-ed, input');
-    wrap.addEventListener('wheel', (e) => { const ed = inText(e.target); if (ed && ed.scrollHeight > ed.clientHeight) return; if (Math.abs(e.deltaY) < 30) return; e.preventDefault(); turn(e.deltaY > 0 ? 1 : -1); }, { passive: false });
+    wrap.addEventListener('wheel', (e) => { if (drawing && e.target.classList && e.target.classList.contains('nb-ink')) { const ed = page.querySelector('.nb-ed'); if (ed && ed.scrollHeight > ed.clientHeight) { ed.scrollTop += e.deltaY; e.preventDefault(); return; } } const ed = inText(e.target); if (ed && ed.scrollHeight > ed.clientHeight) return; if (Math.abs(e.deltaY) < 30) return; e.preventDefault(); turn(e.deltaY > 0 ? 1 : -1); }, { passive: false });
     // на телефоне — листать пальцем: влево — дальше, вправо — назад (пока не пишешь)
     let tsw = null;
-    wrap.addEventListener('touchstart', (e) => { const t = e.touches[0], typing = document.activeElement && page.contains(document.activeElement) && inText(e.target); tsw = e.touches.length === 1 && !typing ? [t.clientX, t.clientY, Date.now()] : null; }, { passive: true });
+    wrap.addEventListener('touchstart', (e) => { const t = e.touches[0], typing = document.activeElement && page.contains(document.activeElement) && inText(e.target); tsw = e.touches.length === 1 && !typing && !drawing ? [t.clientX, t.clientY, Date.now()] : null; }, { passive: true });
     wrap.addEventListener('touchend', (e) => { if (!tsw) return; const t = e.changedTouches[0], dx = t.clientX - tsw[0], dy = t.clientY - tsw[1], ok = Date.now() - tsw[2] < 650 && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.6; tsw = null; if (ok) turn(dx < 0 ? 1 : -1); }, { passive: true });
     paintShelf(); show();
     // чужая правка (с другого устройства) — перерисовать, если сейчас не печатают
