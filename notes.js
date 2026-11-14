@@ -70,6 +70,19 @@ var EkNotes = (function () {
     for (let i = 1; i < P.length - 1; i++) c.quadraticCurveTo(P[i][0], P[i][1], (P[i][0] + P[i + 1][0]) / 2, (P[i][1] + P[i + 1][1]) / 2);
     c.lineTo(P[P.length - 1][0], P[P.length - 1][1]);
   }
+  // зерно грифеля: узор в точках экрана, для каждого цвета — свой (постоянный, без мерцания при перерисовке)
+  const GRAIN = new Map();
+  function grain(t, col, dens, k) {
+    const key = col + '|' + dens + '|' + k; let pt = GRAIN.get(key); if (pt) return pt;
+    const N = 128, c = document.createElement('canvas'); c.width = c.height = N; const g = c.getContext('2d'), im = g.createImageData(N, N), d = im.data;
+    const n = parseInt(col.slice(1), 16), r = (n >> 16) & 255, gg = (n >> 8) & 255, b = n & 255, rnd = seeded(n + dens * 977 + 13);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const i = (y * N + x) * 4, u = rnd(), streak = 0.12 * Math.sin((x * 0.9 + y * 0.35) * 1.7 + rnd() * 0.6);
+      const a = dens ? (u < 0.18 ? 0 : 0.45 + 0.55 * rnd()) : (u < 0.34 ? rnd() * 0.18 : 0.38 + 0.5 * rnd() + streak);
+      d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = Math.round(Math.max(0, Math.min(1, a)) * 255);
+    }
+    g.putImageData(im, 0, 0); pt = t.createPattern(c, 'repeat'); GRAIN.set(key, pt); if (GRAIN.size > 120) GRAIN.delete(GRAIN.keys().next().value); return pt;
+  }
   // форма штриха — во вспомогательный холст (целиком, без прозрачности); прозрачность — при наложении
   function inkShape(t, q, W, H, offY) {
     const P = inkPts(q, W, offY); if (!P.length) return false;
@@ -79,7 +92,12 @@ var EkNotes = (function () {
     t.save(); t.lineCap = t.lineJoin = 'round'; t.strokeStyle = t.fillStyle = q.c;
     const rnd = seeded(q.p.length * 31 + q.p[0] * 7 + q.p[1]);
     if (q.b === 'pen' || q.b === 'marker' || q.b === 'eraser') { t.lineWidth = w; inkPath(t, P); t.stroke(); }
-    else if (q.b === 'pencil') { t.lineWidth = Math.max(0.7, w * 0.55); for (let k = 0; k < 3; k++) { t.globalAlpha = 0.55; t.save(); t.translate((rnd() - 0.5) * w * 0.5, (rnd() - 0.5) * w * 0.5); inkPath(t, P); t.stroke(); t.restore(); } for (let i = 0; i < P.length; i++) if (rnd() < 0.5) { t.globalAlpha = 0.35; t.fillRect(P[i][0] + (rnd() - 0.5) * w, P[i][1] + (rnd() - 0.5) * w, 0.8, 0.8); } }
+    else if (q.b === 'pencil') {
+      // грифель: одна линия, залитая зерном (точки разной плотности и просветы «зубчиков» бумаги); середина плотнее краёв
+      const k = t.getTransform ? t.getTransform().a : 1, pat = (sh, dens) => { const g = grain(t, q.c, dens, k); try { g.setTransform(new DOMMatrix().scale(1 / k).translate(sh, sh * 0.6)); } catch (e) {} return g; };
+      t.strokeStyle = pat(0, w <= 3.2 ? 1 : 0); t.lineWidth = Math.max(1, w); inkPath(t, P); t.stroke();
+      if (w > 2.5) { t.strokeStyle = pat(37, 1); t.lineWidth = Math.max(1, w * 0.55); inkPath(t, P); t.stroke(); }
+    }
     else if (q.b === 'brush') {
       let pw = w;
       for (let i = 0; i < P.length; i++) {
