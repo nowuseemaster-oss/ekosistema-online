@@ -689,3 +689,11 @@ body::before { content: ''; position: fixed; left: 0; top: 0; width: 100%; heigh
 .nb-flash { text-align: center; max-height: 0; overflow: hidden; opacity: 0; font: 600 13px Inter, sans-serif; color: #f2c66a; transition: opacity .25s, max-height .25s; }
 .nb-flash.on { max-height: 40px; opacity: 1; margin-bottom: 6px; }
 @media (max-width: 560px) { .nb-pg { grid-template-columns: repeat(9, 1fr); } .nb-rg input[type=range] { width: 76px; } .nb-dtb { flex-wrap: wrap; overflow: visible; } .nb-dtb .nb-sep { display: none; } }
+/* ================= v7.5: маркер как текстовыделитель, панели без обрезанных кнопок ================= */
+.nb-ink-mk { mix-blend-mode: multiply; pointer-events: none !important; }
+.nb-tb { flex-wrap: wrap; overflow: visible; }
+.nb-tl.col.on { outline: 2px solid #f2c66a; outline-offset: 2px; }
+.nb-recs { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.nb-pclose { margin-left: auto; height: 32px; font: 600 13px Inter, sans-serif; }
+.nb-keys { width: min(760px, 100%); margin: -2px auto 8px; font: 500 12px Inter, sans-serif; color: rgba(239,230,212,.6); text-align: center; }
+.nb-keys[hidden] { display: none; }
