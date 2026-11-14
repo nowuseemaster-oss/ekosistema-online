@@ -164,8 +164,8 @@
     const me = myHero(); if (!me) return false;
     if (!gmOn()) { note('Мастер сейчас не в сети — попробуй, когда он подключится', 'bad'); return false; }
     let { error } = await sb.from('actions').insert({ hero: me, kind, payload });
-    // облик героя и стили — новые виды просьб; если база их ещё не знает, отправляем внутри «облика кубика» (Мастер v7.6 поймёт)
-    if (error && (kind === 'look' || kind === 'style') && !/EK_TOO_FAST/.test(error.message)) ({ error } = await sb.from('actions').insert({ hero: me, kind: 'skin', payload: Object.assign({ sub: kind }, payload) }));
+    // база пропускает от игроков не все виды просьб — тогда та же просьба уходит внутри «облика кубика» (Мастер v7.7 её разворачивает)
+    if (error && kind !== 'skin' && /row-level security|violates|permission/i.test(error.message)) ({ error } = await sb.from('actions').insert({ hero: me, kind: 'skin', payload: Object.assign({ sub: kind }, payload) }));
     if (error) { note(/EK_TOO_FAST/.test(error.message) ? 'Слишком часто — подожди немного' : 'Не получилось: ' + error.message, 'bad'); return false; }
     return true;
   }
@@ -238,6 +238,7 @@
   const soft = () => { clearTimeout(softT); softT = setTimeout(render, 60); };
 
   // ---------- экраны ----------
+  const achOpen = () => store.get('ek_ach_open', !(window.matchMedia && matchMedia('(max-width: 700px)').matches));
   const visTabs = () => TABS.filter(([id]) => id !== 'event' || (S.game.hw && S.game.hw.live));
   // ---------- свайпы между разделами (телефон) ----------
   //  Влево — следующий раздел, вправо — предыдущий. Не мешает: доске, блокноту, полям ввода,
@@ -295,6 +296,7 @@
     { const nb = app.querySelector('.tabs'); if (nb) document.documentElement.style.setProperty('--nvh', nb.getBoundingClientRect().height + 'px'); }
     bindLive();
     const lke = app.querySelector('#lkEdit'); if (lke) lke.addEventListener('click', openLook);
+    app.querySelectorAll('[data-sec=ach]').forEach((b) => b.addEventListener('click', () => { store.set('ek_ach_open', !achOpen()); render(); }));
     app.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => { S.tab = b.dataset.t; store.set('ek_tab', S.tab); window.scrollTo(0, 0); render(); }));
     const snd = app.querySelector('#snd'); if (snd) snd.addEventListener('change', () => { S.sound = snd.checked; store.set('ek_sound', S.sound); if (S.sound) beep(660, 0.2); });
     const out = app.querySelector('#out'); if (out) out.addEventListener('click', () => sb.auth.signOut());
@@ -369,8 +371,9 @@
       ${vCal(H)}${vLook(H, me)}
       ${bf.length ? `<div class="card buffs"><small>Действует сейчас</small><p>${bf.map(esc).join(' · ')}</p></div>` : ''}
       ${items.length || hw ? `<h3>Сладости и предметы ивента</h3>${hwItems(H)}` : ''}
-      <h3>Достижения · ${(H.ach || []).length}${H.achTotal ? ' из ' + H.achTotal : ''}</h3>
-      ${(H.ach || []).length ? `<div class="achs">${H.ach.slice(0, 60).map((a) => `<div class="ach lv${a.lv}" title="${esc(a.d)}"><i class="${String(a.ic || '').length > 3 ? 'l4' : String(a.ic || '').length > 2 ? 'l3' : String(a.ic || '').length > 1 ? 'l2' : ''}">${esc(a.ic)}</i><div><b>${esc(a.t)}</b><small>${esc(a.d)}</small></div></div>`).join('')}</div>` : '<div class="empty sm">Пока ни одного. Всё впереди.</div>'}
+      <h3 class="sec-h"><button type="button" class="sec-tg" data-sec="ach">Достижения · ${(H.ach || []).length}${H.achTotal ? ' из ' + H.achTotal : ''}<em>${achOpen() ? 'свернуть ▴' : 'показать ▾'}</em></button></h3>
+      ${(H.ach || []).length && !achOpen() ? `<div class="ach-mini">${H.ach.slice(0, 10).map((a) => `<i class="lv${a.lv}" title="${esc(a.t)}">${esc(a.ic)}</i>`).join('')}${H.ach.length > 10 ? `<b>+${H.ach.length - 10}</b>` : ''}</div>` : ''}
+      ${(H.ach || []).length && achOpen() ? `<div class="achs">${H.ach.slice(0, 60).map((a) => `<div class="ach lv${a.lv}" title="${esc(a.d)}"><i class="${String(a.ic || '').length > 3 ? 'l4' : String(a.ic || '').length > 2 ? 'l3' : String(a.ic || '').length > 1 ? 'l2' : ''}">${esc(a.ic)}</i><div><b>${esc(a.t)}</b><small>${esc(a.d)}</small></div></div>`).join('')}</div>` : (H.ach || []).length ? '' : '<div class="empty sm">Пока ни одного. Всё впереди.</div>'}
       ${vSkins(H)}
       ${vSpecials(H)}
       <div class="card opts"><label><input type="checkbox" id="snd" ${S.sound ? 'checked' : ''}> Звук при бросках и «твой ход»</label><label><input type="checkbox" id="fxo" ${!window.EkTheme || window.EkTheme.fxOn ? 'checked' : ''}> Живой фон</label><button class="btn ghost" id="out">Выйти из аккаунта</button></div>`;
@@ -750,7 +753,7 @@
   }
 
   // ---------- стили атаки ----------
-  const ST = { el: null, sel: 0, swapFrom: null, openR: {}, spin: null, frozen: null, parts: [], raf: 0, VS: null };
+  const ST = { el: null, sel: 0, swapFrom: null, openR: {}, openS: {}, spin: null, frozen: null, parts: [], raf: 0, VS: null };
   const SPIN_T = 4.4, SFX_PEAK = 1.55;
   const stMeta = () => S.game.styles || null;
   const stRar = (r) => { const M = stMeta(); return (M && M.rar.find((x) => x[0] === r)) || ['c', 'Обычный', 0, '#b9c0c7']; };
@@ -876,7 +879,9 @@
       hd.querySelector('span').textContent = r[1]; hd.querySelector('b').textContent = pct(r[2]); hd.querySelector('em').textContent = L.length ? '▸' : '';
       if (L.length) hd.addEventListener('click', () => { ST.openR[r[0]] = !ST.openR[r[0]]; stOdds(); }); else hd.disabled = true;
       row.appendChild(hd);
-      if (ST.openR[r[0]] && L.length) { const ul = mkEl('ul'); L.forEach((b) => { const li = mkEl('li'); li.title = b.d; li.innerHTML = '<span></span><small></small>'; li.querySelector('span').textContent = b.n; li.querySelector('small').textContent = pct(r[2] / L.length); ul.appendChild(li); }); row.appendChild(ul); }
+      if (ST.openR[r[0]] && L.length) { const ul = mkEl('ul'); L.forEach((b) => { const op = !!ST.openS[b.id], li = mkEl('li', 'ss-li' + (op ? ' open' : '')); li.innerHTML = '<span></span><small></small>'; li.querySelector('span').textContent = (op ? '▾ ' : '▸ ') + b.n; li.querySelector('small').textContent = pct(r[2] / L.length);
+        if (op) { const d = mkEl('p', 'ss-ld', b.d); if (b.src) d.appendChild(mkEl('em', '', ' · отсылка: «' + b.src + '»')); if (b.auto && b.auto.p) d.appendChild(mkEl('em', '', ' · само в бою: ' + b.auto.p + '%')); li.appendChild(d); }
+        li.addEventListener('click', () => { ST.openS[b.id] = !ST.openS[b.id]; stOdds(); }); ul.appendChild(li); }); row.appendChild(ul); }
       box.appendChild(row);
     });
     box.appendChild(mkEl('small', 'ss-on', '«Ничего» сжигает стиль в ячейке I.'));
@@ -1003,7 +1008,8 @@
   const ntDraft = () => { try { store.set('ek_board_draft', { base: NT.base, cur: NT.cur, me: myHero() }); } catch (e) {} };
   const ntName = (k) => (k === 'main' ? 'Мастер' : heroName(k));
   const ntAsk = (t) => Promise.resolve(window.confirm(t));
-  const blankBook = () => ({ pages: [{ id: EkNotes.uid(), ti: '', tx: '', t: Date.now() }], at: 0 });
+  const blankBook = () => EkNotes.normShelf({});
+  const shelfOf = (d) => { const S2 = EkNotes.normShelf(EkNotes.clone(d)); const c = store.get('ek_book_cur', null); if (c && S2.books.some((b) => b.id === c)) S2.cur = c; return S2; };
   async function ntInit() {
     if (NT.st === 'on' || NT.st === 'load' || !window.EkNotes) return;
     NT.st = 'load'; const me = myHero();
@@ -1012,7 +1018,7 @@
       if (error) throw error;
       const rows = {}; (data || []).forEach((r) => { rows[r.id] = r; });
       const bk = rows['book:' + me] && rows['book:' + me].data;
-      NT.book = bk && Array.isArray(bk.pages) && bk.pages.length ? { pages: bk.pages, at: store.get('ek_book_at', 0) } : blankBook();
+      NT.book = bk && (Array.isArray(bk.books) || Array.isArray(bk.pages)) ? shelfOf(bk) : blankBook();
       const doc = EkNotes.fixBoard(rows.board ? rows.board.data : {});
       // несохранённый черновик доски переживает перезагрузку страницы
       const dr = store.get('ek_board_draft', null);
@@ -1022,7 +1028,7 @@
       if (!NT.ch) NT.ch = sb.channel('notes').on('postgres_changes', { event: '*', schema: 'public', table: 'notes' }, (p) => ntRow(p.new)).subscribe();
     } catch (e) {
       NT.st = NOTAB(e) ? 'nosql' : 'err'; NT.err = e.message || String(e);
-      NT.book = store.get('ek_book_local', null) || blankBook();    // пока облако не готово — блокнот хранится на этом устройстве
+      NT.book = shelfOf(store.get('ek_book_local', null) || {});    // пока облако не готово — блокноты хранятся на этом устройстве
     }
     ntPaint();
   }
@@ -1034,19 +1040,19 @@
       const ops = NT.base && NT.cur ? EkNotes.diff(NT.base, NT.cur) : { n: 0 };
       NT.base = EkNotes.clone(doc); NT.cur = ops.n ? EkNotes.apply(doc, ops) : EkNotes.clone(doc);
       if (NT.ctl && NT.tab === 'board') { NT.ctl.refresh(); ntSave(); }
-    } else if (row.id === 'book:' + me && row.data && Array.isArray(row.data.pages) && row.data.pages.length) {
+    } else if (row.id === 'book:' + me && row.data && (Array.isArray(row.data.books) || Array.isArray(row.data.pages))) {
       if (Date.now() - NT.bookT < 4000) return;   // своё же эхо
-      const at = NT.book ? NT.book.at : 0; NT.book = { pages: row.data.pages, at: Math.min(at | 0, row.data.pages.length - 1) };
+      NT.book = shelfOf(row.data);
       if (NT.tab === 'book') ntRemountBook();
     }
   }
   let bookT = 0;
   function bookChanged() {
-    store.set('ek_book_at', NT.book.at);
+    store.set('ek_book_cur', NT.book.cur);
     if (NT.st !== 'on') { store.set('ek_book_local', NT.book); return; }
     clearTimeout(bookT); bookT = setTimeout(async () => {
       NT.bookT = Date.now();
-      const r = await sb.from('notes').upsert({ id: 'book:' + myHero(), data: { pages: NT.book.pages }, updated_at: new Date().toISOString() });
+      const r = await sb.from('notes').upsert({ id: 'book:' + myHero(), data: { books: NT.book.books, cur: NT.book.cur }, updated_at: new Date().toISOString() });
       if (r.error) note('Блокнот не сохранился: ' + r.error.message, 'bad');
     }, 1200);
   }
@@ -1078,13 +1084,13 @@
   function ntPaint() {
     const B = NT.el; if (!B) return; B.innerHTML = ''; NT.ctl = null;
     const tb = mkEl('div', 'nt-tabs');
-    [['book', '📓 Личный блокнот'], ['board', '📌 Общая доска']].forEach(([id, t]) => { const b = mkEl('button', id === NT.tab ? 'on' : '', t); b.type = 'button'; b.dataset.nt = id; b.addEventListener('click', () => { if (NT.tab === id) return; NT.tab = id; store.set('ek_nt_tab', id); ntPaint(); }); tb.appendChild(b); });
+    [['book', '📓 Мои блокноты'], ['board', '📌 Общая доска']].forEach(([id, t]) => { const b = mkEl('button', id === NT.tab ? 'on' : '', t); b.type = 'button'; b.dataset.nt = id; b.addEventListener('click', () => { if (NT.tab === id) return; NT.tab = id; store.set('ek_nt_tab', id); ntPaint(); }); tb.appendChild(b); });
     B.appendChild(tb);
     if (NT.st === 'off' || NT.st === 'load' || !NT.book) { B.appendChild(mkEl('div', 'empty', 'Открываю заметки…')); return; }
     if (NT.st !== 'on') B.appendChild(mkEl('p', 'nt-warn', NT.st === 'nosql' ? 'Заметки в облаке ещё не включены (Мастеру нужно запустить файл 03_zametki.sql). Пока блокнот хранится только на этом устройстве, а общей доски нет.' : 'Нет связи с заметками: ' + NT.err));
     const me = myHero();
     if (NT.tab === 'book') {
-      NT.ctl = EkNotes.mountBook(B, { book: NT.book, color: heroCol(me), confirm: ntAsk, hint: 'Личный блокнот: его видишь только ты (и Мастер). Пишется само — сохранять не нужно.', onChange: bookChanged });
+      NT.ctl = EkNotes.mountBook(B, { book: NT.book, color: heroCol(me), confirm: ntAsk, prompt: (t, v) => Promise.resolve(window.prompt(t, v)), hint: 'Личные блокноты: их видишь только ты (и Мастер). Выдели слова — и маркер, подчёркивание, цвет. Сохраняется само.', onChange: bookChanged });
       return;
     }
     if (NT.st !== 'on') return;
