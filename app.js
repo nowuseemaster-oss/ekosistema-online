@@ -12,7 +12,7 @@
   const HEROES = ['p0', 'p1', 'p2'];
   const WH = [['Серый', '0', '#9aa0a6'], ['Бирюзовый', 'I', '#3fc7c0'], ['Синий', 'II', '#3c7be0'], ['Индиго', 'III', '#5b4bd1'], ['Фиолетовый', 'IV', '#9b4fd6'], ['Розовый', 'V', '#e86aa6'], ['Красный', 'VI', '#d8323f'], ['Красно-чёрный', 'VII', '#7a0f18']];
   const RAR = ['', 'обычный', 'редкий', 'эпический', 'легендарный', 'мифический'];
-  const TABS = [['rolls', '🎲', 'Броски'], ['me', '◆', 'Я'], ['bag', '🎒', 'Вещи'], ['board', '📌', 'Заказы'], ['fight', '⚔', 'Бой'], ['team', '👥', 'Отряд'], ['event', '🎃', 'Ивент'], ['journal', '📜', 'Журнал']];
+  const TABS = [['rolls', '🎲', 'Броски'], ['me', '◆', 'Я'], ['style', '🎴', 'Стили'], ['bag', '🎒', 'Вещи'], ['board', '📌', 'Заказы'], ['fight', '⚔', 'Бой'], ['team', '👥', 'Отряд'], ['notes', '📓', 'Заметки'], ['event', '🎃', 'Ивент'], ['journal', '📜', 'Журнал']];
   const S = { user: null, prof: null, game: {}, heroes: {}, rolls: [], tab: store.get('ek_tab', 'rolls'), sound: store.get('ek_sound', true), err: '', fresh: null, myTurnSeen: null };
   if (!window.supabase) { app.innerHTML = '<div class="boot">Не загрузилась библиотека связи. Проверь интернет и обнови страницу.</div>'; return; }
   const INV = (() => { try { return (new URLSearchParams(location.search).get('code') || '').trim().toUpperCase().slice(0, 12); } catch (e) { return ''; } })();
@@ -32,11 +32,11 @@
   // кубики обликов: картинки сняты с настоящих кубиков Экосистемы
   let DK = {};
   fetch('dice/dice.json').then((r) => r.json()).then((j) => { DK = j; soft(); }).catch(() => {});
-  const SPI = { '21': '21', '0': '0', '-1': '−1', Angel: '☩', '777': '777', '666': '666', '01010011': '⛨', HACK: '⌁', ERROR: '!', NULL: '∅', Abyss: '◉', Andromeda: '✧', Galaxy: '✺', Comet: '☄', Singularity: '◍', Pustota: '◌', Sunrise: '☀', Illusion: '◈', Debt: '¤', Barter: '⇄', Nostalgia: '❀', Dejavu: '↺', Jester: '🃏', Life: '⌛', TrickTreat: '🍬', Pumpkin: '🎃', Thirteen: '13', HwGhost: '👻' };
+  const SPI = { '21': '21', '0': '0', '-1': '−1', Angel: '☩', '777': '777', '666': '666', '01010011': '⛨', HACK: '⌁', ERROR: '!', NULL: '∅', Abyss: '◉', Andromeda: '✧', Galaxy: '✺', Comet: '☄', Singularity: '◍', Pustota: '◌', Sunrise: '☀', Illusion: '◈', Debt: '¤', Barter: '⇄', Nostalgia: '❀', Dejavu: '↺', Jester: '🃏', Life: '⌛', Calamity: '❂', TrickTreat: '🍬', Pumpkin: '🎃', Thirteen: '13', HwGhost: '👻' };
   const teamSkin = (k) => S.game.team && S.game.team.skins && S.game.team.skins[k];
   const skinOf = (k) => (k === 'main' ? teamSkin('main') : (S.heroes[k] && S.heroes[k].skin) || teamSkin(k)) || 'classic';
   const dimg = (sk) => 'dice/' + encodeURIComponent(sk || 'classic') + '.webp';
-  const faceTxt = (r) => (/^-?\d+$/.test(r.value) ? String(r.value).replace('-', '−') : SPI[r.value] || '✦');
+  const faceTxt = (r) => (/^-?\d+$/.test(r.value) ? String(r.value).replace('-', '−') : SPI[r.value] || (S.game.team && S.game.team.spi && S.game.team.spi[r.value]) || '✦');
   function d20(r, B, cls) {
     const sk = skinOf(r.hero), f = DK[sk] || 0.5, img = Math.round(Math.min(B / f, B * 2.4)), t = faceTxt(r), fs = Math.round(B * 0.4 * Math.min(1, 2.2 / Math.max(1, Array.from(t).length)));
     return `<div class="d20 ${cls || ''}" style="--s:${img}px"><img src="${dimg(sk)}" alt="" onerror="this.onerror=null;this.src='dice/classic.webp'"><b style="font-size:${fs}px">${esc(t)}</b></div>`;
@@ -185,6 +185,8 @@
       else note('Не вышло: ' + (r.why || 'неизвестно'), 'bad');
       soft();
     }
+    if (a.kind === 'look') { busy(null); if (r.ok) { note('Облик сохранён ✓', 'good'); beep(660, 0.15, 0.05); setTimeout(() => beep(990, 0.2, 0.05), 110); buzz(30); } else note('Облик не сохранился: ' + (r.why || 'неизвестно'), 'bad'); soft(); }
+    if (a.kind === 'style') stResult(a);
     if (a.kind === 'pumpkin') { busy(null); if (r.ok) { note('🎃 +' + r.n + ' 🍬 — тыква поймана!', 'good'); beep(880, 0.2); setTimeout(() => beep(1320, 0.3), 120); buzz([40, 30, 40]); } else note('Тыква: ' + (r.why || 'не засчитана'), 'bad'); }
   }
   // ---------- тыквы на экране ----------
@@ -248,9 +250,17 @@
     const tabs = TABS.filter(([id]) => id !== 'event' || (S.game.hw && S.game.hw.live));
     if (!tabs.find(([id]) => id === S.tab)) S.tab = 'rolls';
     const nav = `<nav class="tabs">${tabs.map(([id, ic, t]) => `<button data-t="${id}" class="${S.tab === id ? 'on' : ''}"><i>${ic}</i><span>${t}</span>${id === 'fight' && myTurn ? '<em></em>' : ''}${id === 'bag' && S.dr.moves.length ? '<em class="dr"></em>' : ''}</button>`).join('')}</nav>`;
-    const body = ({ rolls: vRolls, me: vMe, bag: vBag, board: vBoard, fight: vFight, team: vTeam, event: vEvent, journal: vJournal }[S.tab] || vRolls)();
+    const rich = { style: stylePane, notes: notesPane }[S.tab];
     const y = window.scrollY;
-    app.innerHTML = head + `<main class="pane">${body}</main>` + nav;
+    if (!app.querySelector('#hd')) app.innerHTML = '<div id="hd"></div><main class="pane" id="pane"></main><div id="nv"></div>';
+    const hd = app.querySelector('#hd'), pane = app.querySelector('#pane'), nv = app.querySelector('#nv');
+    hd.innerHTML = head; nv.innerHTML = nav;
+    document.documentElement.style.setProperty('--hdh', Math.max(48, ...[...hd.children].map((e) => e.getBoundingClientRect().bottom)) + 'px');   // шапка и плашки под ней («Мастер не в сети», «твой ход»)
+    if (rich) { const el = rich(); pane.classList.add('rich'); if (pane.firstChild !== el || pane.childNodes.length !== 1) pane.replaceChildren(el); if (el.__refresh) el.__refresh(); }
+    else { pane.classList.remove('rich'); pane.innerHTML = ({ rolls: vRolls, me: vMe, bag: vBag, board: vBoard, fight: vFight, team: vTeam, event: vEvent, journal: vJournal }[S.tab] || vRolls)(); }
+    { const nb = app.querySelector('.tabs'); if (nb) document.documentElement.style.setProperty('--nvh', nb.getBoundingClientRect().height + 'px'); }
+    bindLive();
+    const lke = app.querySelector('#lkEdit'); if (lke) lke.addEventListener('click', openLook);
     app.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => { S.tab = b.dataset.t; store.set('ek_tab', S.tab); window.scrollTo(0, 0); render(); }));
     const snd = app.querySelector('#snd'); if (snd) snd.addEventListener('change', () => { S.sound = snd.checked; store.set('ek_sound', S.sound); if (S.sound) beep(660, 0.2); });
     const out = app.querySelector('#out'); if (out) out.addEventListener('click', () => sb.auth.signOut());
@@ -322,10 +332,11 @@
     return `<div class="card hero" style="--hc:${heroCol(me)}"><div class="hrow"><div><h2>${esc(H.name || heroName(me))}</h2><span class="wh" style="--wc:${w[2]}"><i></i>${w[0]} свисток · ${w[1]}</span></div></div>
       ${xpBar(H.xp, true)}${dndBar(H.dnd, true)}${hpBar(H.hp, true)}
       <div class="stats"><div><small>Кошелёк</small>${money(H.wallet)}</div>${hw ? `<div><small>Конфеты</small><b>🍬 ${H.candy || 0}</b></div>` : ''}${H.stats ? `<div><small>Бросков</small><b>${H.stats.rolls}</b></div><div><small>Двадцаток</small><b>${H.stats.n20}</b></div><div><small>Единиц</small><b>${H.stats.n1}</b></div><div><small>Средний</small><b>${H.stats.avg || '—'}</b></div>` : ''}</div></div>
+      ${vCal(H)}${vLook(H, me)}
       ${bf.length ? `<div class="card buffs"><small>Действует сейчас</small><p>${bf.map(esc).join(' · ')}</p></div>` : ''}
       ${items.length || hw ? `<h3>Сладости и предметы ивента</h3>${hwItems(H)}` : ''}
       <h3>Достижения · ${(H.ach || []).length}${H.achTotal ? ' из ' + H.achTotal : ''}</h3>
-      ${(H.ach || []).length ? `<div class="achs">${H.ach.slice(0, 60).map((a) => `<div class="ach lv${a.lv}" title="${esc(a.d)}"><i>${esc(a.ic)}</i><div><b>${esc(a.t)}</b><small>${esc(a.d)}</small></div></div>`).join('')}</div>` : '<div class="empty sm">Пока ни одного. Всё впереди.</div>'}
+      ${(H.ach || []).length ? `<div class="achs">${H.ach.slice(0, 60).map((a) => `<div class="ach lv${a.lv}" title="${esc(a.d)}"><i class="${String(a.ic || '').length > 3 ? 'l4' : String(a.ic || '').length > 2 ? 'l3' : String(a.ic || '').length > 1 ? 'l2' : ''}">${esc(a.ic)}</i><div><b>${esc(a.t)}</b><small>${esc(a.d)}</small></div></div>`).join('')}</div>` : '<div class="empty sm">Пока ни одного. Всё впереди.</div>'}
       ${vSkins(H)}
       ${vSpecials(H)}
       <div class="card opts"><label><input type="checkbox" id="snd" ${S.sound ? 'checked' : ''}> Звук при бросках и «твой ход»</label><label><input type="checkbox" id="fxo" ${!window.EkTheme || window.EkTheme.fxOn ? 'checked' : ''}> Живой фон</label><button class="btn ghost" id="out">Выйти из аккаунта</button></div>`;
@@ -414,7 +425,7 @@
   }
   function vTeam() {
     const T = S.game.team || {};
-    return `<h3>${esc(T.party || 'Отряд')}${T.rest === 'long' ? ' <small>☀ долгий отдых — аптечка лечит вдвое</small>' : ''}</h3>${HEROES.map((k) => { const H = S.heroes[k] || {}, w = WH[Math.min(7, H.whistle || 0)]; return `<div class="card hero sm" style="--hc:${heroCol(k)}"><div class="hrow"><div><h2>${esc(H.name || heroName(k))}</h2><span class="wh" style="--wc:${w[2]}"><i></i>${w[0]} · ${w[1]}</span></div><div class="right">${money(H.wallet)}${S.game.hw && S.game.hw.live ? `<small>🍬 ${H.candy || 0}</small>` : ''}</div></div>${xpBar(H.xp)}${dndBar(H.dnd)}${hpBar(H.hp)}</div>`; }).join('')}
+    return `<h3>${esc(T.party || 'Отряд')}${T.rest === 'long' ? ' <small>☀ долгий отдых — аптечка лечит вдвое</small>' : ''}</h3>${HEROES.map((k) => { const H = S.heroes[k] || {}, w = WH[Math.min(7, H.whistle || 0)]; return `<div class="card hero sm ${H.look ? 'lk' : ''}" style="--hc:${heroCol(k)}">${H.look ? `<canvas class="lk-team" data-look="${k}"></canvas>` : ''}<div class="hrow"><div><h2>${esc(H.name || heroName(k))}</h2><span class="wh" style="--wc:${w[2]}"><i></i>${w[0]} · ${w[1]}</span></div><div class="right">${money(H.wallet)}${S.game.hw && S.game.hw.live ? `<small>🍬 ${H.candy || 0}</small>` : ''}</div></div>${xpBar(H.xp)}${dndBar(H.dnd)}${hpBar(H.hp)}</div>`; }).join('')}
       ${S.game.board && S.game.board.fund ? `<div class="card"><small>Общий фонд</small> ${money(S.game.board.fund)}</div>` : ''}`;
   }
   function vEvent() {
@@ -596,6 +607,462 @@
     return `<div class="jf">${JF.map(([id, t, ks]) => `<button data-jf="${id}" class="${id === f[0] ? 'on' : ''}">${t}${ks ? ` <small>${J.filter((e) => ks.includes(e.k)).length}</small>` : ''}</button>`).join('')}</div>
       ${L.length ? `<ul class="jr">${L.slice().reverse().map((e) => `<li class="${e.imp ? 'imp' : ''} k-${esc(e.k || '')}"><i>${esc(e.ic || '•')}</i><span>${esc(e.txt)}</span><small>${ago(e.t)}</small></li>`).join('')}</ul>` : '<div class="empty sm">Здесь пока пусто.</div>'}`;
   }
+  // =====================================================================
+  //  v7.5: облик героя, стили атаки, заметки, Каламити — как в Экосистеме Мастера
+  // =====================================================================
+  const TAU = Math.PI * 2;
+  const hexA = (c, a) => { const m = /^#?([0-9a-f]{6})$/i.exec(c || ''); if (!m) return 'rgba(128,128,128,' + a + ')'; const n = parseInt(m[1], 16); return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + Math.max(0, Math.min(1, a)) + ')'; };
+  const rgbOf = (c) => { const m = /^#?([0-9a-f]{6})$/i.exec(c || ''); const n = m ? parseInt(m[1], 16) : 0x808080; return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+  const toHex = (v) => '#' + v.map((q) => Math.round(Math.max(0, Math.min(255, q))).toString(16).padStart(2, '0')).join('');
+  const rnd = Math.random;
+  const lookOf = (k) => { const H = S.heroes[k] || {}; return H.look || null; };
+  const mkEl = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+
+  // ---------- живые холсты с человечком (Я, Отряд) ----------
+  const LIVE = new Set(); let liveRaf = 0;
+  function liveCv(cv, getL) { LIVE.add({ cv, getL }); if (!liveRaf) liveRaf = requestAnimationFrame(liveTick); }
+  function liveTick(now) {
+    liveRaf = 0; const t = now / 1000;
+    LIVE.forEach((q) => {
+      if (!q.cv.isConnected) { LIVE.delete(q); return; }
+      const cv = q.cv, dpr = Math.min(2, devicePixelRatio || 1), W = cv.clientWidth, H = cv.clientHeight; if (!W || !H) return;
+      if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+      const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
+      const L = q.getL(); if (!L || !window.EkLook) return;
+      const g = c.createRadialGradient(W / 2, H * 0.88, 2, W / 2, H * 0.88, W * 0.4); g.addColorStop(0, 'rgba(0,0,0,.5)'); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.beginPath(); c.ellipse(W / 2, H * 0.89, W * 0.3, H * 0.035, 0, 0, TAU); c.fill();
+      window.EkLook.draw(c, W / 2, H * 0.89, H * 0.6, L, { t });
+    });
+    if (LIVE.size) liveRaf = requestAnimationFrame(liveTick);
+  }
+  function bindLive(root) { (root || app).querySelectorAll('canvas[data-look]').forEach((cv) => { if (!cv.__lk) { cv.__lk = 1; liveCv(cv, () => lookOf(cv.dataset.look)); } }); }
+  function lookLine(L) {
+    const E = window.EkLook; if (!E || !L) return '';
+    const n = (k) => ((E.OPT[k] || []).find((q) => q[0] === L[k]) || [])[1] || '';
+    return [E.RACES[L.race] ? E.RACES[L.race].n : '', '~' + E.cmOf(E.norm(L)) + ' см', L.hat !== 'none' ? n('hat').toLowerCase() : '', n('jacket').toLowerCase()].filter(Boolean).join(' · ');
+  }
+  function vLook(H, me) {
+    const off = !gmOn(), L = H.look;
+    if (!L || !window.EkLook) return '';
+    return `<h3>Облик героя</h3><div class="card lkc"><canvas class="lk-mini" data-look="${esc(me)}"></canvas><div class="lkc-tx"><b>${esc(lookLine(L))}</b>
+      <button class="btn" id="lkEdit" ${off ? 'disabled' : ''}>✎ Изменить облик</button><p class="note">${off ? 'Изменить можно, когда Мастер в сети.' : 'Этого же человечка видно на экране стилей. Свисток — не выше твоего ранга.'}</p></div></div>`;
+  }
+  // ---------- редактор облика (черновик → «Сохранить») ----------
+  function openLook() {
+    const me = myHero(), H = S.heroes[me] || {}, E = window.EkLook; if (!me || !E || !H.look) return;
+    const L = E.norm(JSON.parse(JSON.stringify(H.look))), rk = Math.max(0, Math.min(7, H.whistle | 0));
+    const ov = mkEl('div', 'lk-sheet'); ov.innerHTML = '<div class="lk-card"><header><h3>Облик героя</h3><button class="is-x" type="button" aria-label="Закрыть">×</button></header><div class="lk-wrap"><div class="lk-stage"><canvas class="lk-cv"></canvas></div><div class="lk-ctl"></div></div><footer><button class="btn ghost" data-a="no" type="button">Отмена</button><button class="btn primary" data-a="ok" type="button">Сохранить</button></footer></div>';
+    document.body.appendChild(ov); requestAnimationFrame(() => ov.classList.add('on'));
+    const ctl = ov.querySelector('.lk-ctl'), cv = ov.querySelector('.lk-cv');
+    let alive = true;
+    const close = () => { alive = false; ov.classList.remove('on'); ov.classList.add('out'); setTimeout(() => ov.remove(), 250); };
+    ov.querySelector('.is-x').addEventListener('click', close); ov.querySelector('[data-a=no]').addEventListener('click', close);
+    ov.querySelector('[data-a=ok]').addEventListener('click', async () => {
+      if (!gmOn()) { note('Мастер сейчас не в сети — облик сохранится, когда он подключится', 'bad'); return; }
+      close(); busy('Сохраняю облик героя', 'Экосистема Мастера переодевает героя — пару секунд');
+      if (!(await ask('look', { L }))) busy(null);
+    });
+    const draw = () => {
+      ctl.innerHTML = '';
+      const row = (title, key, list) => { const r = mkEl('div', 'lk-row'); r.appendChild(mkEl('small', '', title)); const g = mkEl('div', 'lk-opts'); list.forEach(([v, t]) => { const b = mkEl('button', L[key] === v ? 'on' : '', t); b.type = 'button'; b.addEventListener('click', () => { L[key] = v; if (key === 'race') { const D = { dwarf: { beard: 'long', hair: 'short' }, elf: { beard: 'none', hair: 'long' }, helf: { beard: 'none' }, half: { beard: 'none' } }[v]; if (D) Object.assign(L, D); } draw(); }); g.appendChild(b); }); r.appendChild(g); ctl.appendChild(r); };
+      const sw = (title, key, cols) => { const r = mkEl('div', 'lk-row'); r.appendChild(mkEl('small', '', title)); const g = mkEl('div', 'lk-sw'); cols.forEach((col, i) => { const b = mkEl('button', L[key] === i ? 'on' : ''); b.type = 'button'; b.style.background = col; b.addEventListener('click', () => { L[key] = i; draw(); }); g.appendChild(b); }); r.appendChild(g); ctl.appendChild(r); };
+      row('Раса', 'race', E.OPT.race);
+      { const r = mkEl('div', 'lk-row lk-ht'), lb = mkEl('small', ''), rg = mkEl('input');
+        rg.type = 'range'; rg.step = 0.01; rg.min = L.anom ? E.HA0 : E.HT0; rg.max = L.anom ? E.HA1 : E.HT1; rg.value = L.ht; r.classList.toggle('anom', !!L.anom);
+        const upd = () => { const odd = L.ht < E.HT0 - 0.001 || L.ht > E.HT1 + 0.001; lb.textContent = 'Рост · ~' + E.cmOf(L) + ' см' + (Math.abs(L.ht - 1) < 0.005 ? ' (обычный)' : odd ? (L.ht < 1 ? ' (аномально низкий)' : ' (аномально высокий)') : L.ht < 1 ? ' (ниже обычного)' : ' (выше обычного)'); };
+        rg.addEventListener('input', () => { L.ht = E.clampHt(rg.value, L.anom); upd(); });
+        const an = mkEl('button', 'lk-anom' + (L.anom ? ' on' : ''), 'Аномальный'); an.type = 'button'; an.title = 'Разрешить рост ещё на 10% выше или ниже обычного для расы';
+        an.addEventListener('click', () => { L.anom = !L.anom; L.ht = E.clampHt(L.ht, L.anom); draw(); });
+        const r0 = mkEl('button', 'btn ghost lk-r0', '↺'); r0.type = 'button'; r0.title = 'Обычный рост'; r0.addEventListener('click', () => { L.ht = 1; draw(); });
+        const line = mkEl('div', 'lk-htl'); line.append(rg, an, r0); upd(); r.append(lb, line); ctl.appendChild(r); }
+      sw('Кожа', 'skin', E.SKIN); row('Волосы', 'hair', E.OPT.hair); sw('Цвет волос', 'hairC', E.HAIRC); row('Борода', 'beard', E.OPT.beard); sw('Глаза', 'eye', E.EYEC);
+      row('Головной убор', 'hat', E.OPT.hat); sw('Цвет убора', 'hatC', E.CLOTH); row('Верх', 'jacket', E.OPT.jacket); sw('Цвет верха', 'jacketC', E.CLOTH); row('Низ', 'pants', E.OPT.pants); sw('Цвет низа', 'pantsC', E.CLOTH); sw('Обувь', 'bootC', E.CLOTH);
+      row('За спиной', 'pack', E.OPT.pack); sw('Цвет сумки', 'packC', E.CLOTH); row('Шарф', 'scarf', E.OPT.scarf); sw('Цвет шарфа', 'scarfC', E.CLOTH);
+      { if (L.wh > rk) L.wh = rk;
+        const r = mkEl('div', 'lk-row'); r.appendChild(mkEl('small', '', 'Свисток · твой ранг — ' + E.WHN[rk].toLowerCase())); const g = mkEl('div', 'lk-sw');
+        const hide = mkEl('button', 'lk-whx' + (L.wh === -1 ? ' on' : ''), '✕'); hide.type = 'button'; hide.title = 'Спрятать свисток'; hide.addEventListener('click', () => { L.wh = -1; draw(); }); g.appendChild(hide);
+        E.WHC.forEach((col, i) => { const b = mkEl('button', L.wh === i ? 'on' : ''); b.type = 'button'; b.style.background = col; const up = i > rk; b.disabled = up; b.title = E.WHN[i] + (up ? ' — такого свистка у героя нет' : ''); b.addEventListener('click', () => { if (!up) { L.wh = i; draw(); } }); g.appendChild(b); });
+        r.appendChild(g); ctl.appendChild(r); }
+      const acts = mkEl('div', 'lk-acts'), rn = mkEl('button', 'btn', '🎲 Случайно'), rs = mkEl('button', 'btn ghost', 'Как было'); rn.type = rs.type = 'button';
+      rn.addEventListener('click', () => { const pick = (a) => a[Math.floor(Math.random() * a.length)]; Object.assign(L, { race: pick(E.OPT.race)[0], skin: Math.floor(Math.random() * E.SKIN.length), ht: Math.round((0.9 + Math.random() * 0.2) * 100) / 100, anom: false, hair: pick(E.OPT.hair)[0], hairC: Math.floor(Math.random() * E.HAIRC.length), beard: pick(E.OPT.beard)[0], hat: pick(E.OPT.hat)[0], hatC: Math.floor(Math.random() * E.CLOTH.length), jacket: pick(E.OPT.jacket)[0], jacketC: Math.floor(Math.random() * E.CLOTH.length), pants: pick(E.OPT.pants)[0], pantsC: Math.floor(Math.random() * E.CLOTH.length), bootC: Math.floor(Math.random() * E.CLOTH.length), pack: pick(E.OPT.pack)[0], packC: Math.floor(Math.random() * E.CLOTH.length), scarf: pick(E.OPT.scarf)[0], scarfC: Math.floor(Math.random() * E.CLOTH.length), eye: Math.floor(Math.random() * E.EYEC.length) }); draw(); });
+      rs.addEventListener('click', () => { Object.assign(L, E.norm(JSON.parse(JSON.stringify(H.look)))); draw(); });
+      acts.append(rn, rs); ctl.appendChild(acts);
+    };
+    draw();
+    const t0 = performance.now();
+    (function fr(now) {
+      if (!alive) return;
+      const dpr = Math.min(2, devicePixelRatio || 1), W = cv.clientWidth, Hh = cv.clientHeight;
+      if (W && Hh) {
+        if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(Hh * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(Hh * dpr); }
+        const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, Hh);
+        const g = c.createRadialGradient(W / 2, Hh * 0.84, 4, W / 2, Hh * 0.84, W * 0.42); g.addColorStop(0, 'rgba(0,0,0,.45)'); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.beginPath(); c.ellipse(W / 2, Hh * 0.86, W * 0.32, Hh * 0.035, 0, 0, TAU); c.fill();
+        E.draw(c, W / 2, Hh * 0.86, Hh * 0.58, L, { t: (now - t0) / 1000 });
+      }
+      requestAnimationFrame(fr);
+    })(t0);
+  }
+
+  // ---------- Каламити: карточка носителя ----------
+  function vCal(H) {
+    const Q = H.cal, T = S.game.cal; if (!Q || !T || !T.txt) return '';
+    const mx = T.max || 10, cr = Math.max(0, Math.min(mx, Q.cr | 0));
+    const st = { p1: '', p2: '', we: Q.we ? 'венец уже держит следующий бросок' : Q.q ? 'худший кубик ляжет следующим броском' : 'готова', dbl: Q.dbl > 0 ? 'двойник ещё на ' + Q.dbl + ' ' + (Q.dbl === 1 ? 'бросок' : 'броска') : 'готова', ult: Q.ult ? 'после долгого отдыха' : 'готова' };
+    const row = (id, kind) => { const t = T.txt[id]; if (!t) return ''; return `<li class="${kind}"><div><b>${esc(t[0])}</b>${st[id] ? `<em class="${/готова/.test(st[id]) ? 'ok' : ''}">${esc(st[id])}</em>` : ''}</div><p>${esc(t[1])}</p><div class="clgb"><span class="g">＋ ${esc(t[2])}</span><span class="b">− ${esc(t[3])}</span></div></li>`; };
+    return `<h3>❂ Каламити <small>проклятая способность · не снимается</small></h3><div class="card clc ${cr >= 7 ? 'hot' : ''}">
+      <div class="clg"><span>Раскол</span><div class="clp">${Array.from({ length: mx }, (_, i) => `<i class="${i < cr ? 'on' : ''}"></i>`).join('')}</div><b>${cr}/${mx}</b></div>
+      <p class="note">${cr >= mx ? 'Венец забрал тело на один ход.' : cr >= 5 ? 'Венец давит сильнее: «Ты сильнее» тянет на ±3.' : 'На 10 венец на один ход забирает тело.'}</p>
+      <h4>Пассивки</h4><ul class="cll">${row('p1', 'pas')}${row('p2', 'pas')}</ul><h4>Способности</h4><ul class="cll">${row('we', 'ab')}${row('dbl', 'ab')}${row('ult', 'ab ult')}</ul>
+      <p class="note">Способности включает Мастер — попроси его. Короткий отдых — Раскол −1 · долгий — −3, и «Каламити» снова готова.</p></div>`;
+  }
+
+  // ---------- стили атаки ----------
+  const ST = { el: null, sel: 0, swapFrom: null, openR: {}, spin: null, frozen: null, parts: [], raf: 0, VS: null };
+  const SPIN_T = 4.4, SFX_PEAK = 1.55;
+  const stMeta = () => S.game.styles || null;
+  const stRar = (r) => { const M = stMeta(); return (M && M.rar.find((x) => x[0] === r)) || ['c', 'Обычный', 0, '#b9c0c7']; };
+  const stRI = (r) => { const M = stMeta(); return M ? M.rar.findIndex((x) => x[0] === r) : -1; };
+  const stSty = (id) => { const M = stMeta(); return (M && id && M.base.find((b) => b.id === id)) || null; };
+  const stMine = () => { if (ST.frozen) return ST.frozen; const H = S.heroes[myHero()] || {}; return H.sty || null; };
+  const stOpen = (o, i) => { const M = stMeta(); return !!o && !!M && o.lvl >= M.open[i]; };
+  const stAct = (o, i) => { const M = stMeta(); return !!o && !!M && o.lvl >= M.act[i]; };
+  const pct = (v) => String(+(+v).toFixed(3)).replace('.', ',') + '%';
+  function stRollLocal() { const M = stMeta(); let u = rnd() * 100; for (const r of M.rar) { u -= r[2]; if (u < 0) { if (r[0] === 'x') return { r: 'x', id: null }; const L = M.base.filter((b) => b.r === r[0]); return L.length ? { r: r[0], id: L[Math.floor(rnd() * L.length)].id } : { r: 'c', id: null }; } } return { r: 'c', id: null }; }
+  // звук: нагнетание, сброс, свой звук получения (тот же, что у Мастера)
+  let AC = null, MG = null, SFXB = null, sfxLoading = false, NB = null;
+  function ac() { if (!AC) { AC = new (window.AudioContext || window.webkitAudioContext)(); const comp = AC.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4; MG = AC.createGain(); MG.gain.value = 0.9; MG.connect(comp); comp.connect(AC.destination); } if (AC.state === 'suspended') { try { AC.resume(); } catch (e) {} } return AC; }
+  function loadSfx() { if (SFXB || sfxLoading || !window.EK_SFX_GET) return; sfxLoading = true; try { const a = ac(), bin = atob(window.EK_SFX_GET), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); const pr = a.decodeAudioData(u8.buffer, (bf) => { SFXB = bf; }, () => {}); if (pr && pr.then) pr.then((bf) => { SFXB = bf; }).catch(() => {}); } catch (e) {} }
+  function playSfx(when, vol) { try { if (!SFXB || !S.sound) return; const a = ac(), src = a.createBufferSource(), g = a.createGain(); src.buffer = SFXB; g.gain.value = vol || 1; src.connect(g); g.connect(MG); src.start(Math.max(a.currentTime, when)); } catch (e) {} }
+  function tone(f, d, v, type, at) { try { if (!S.sound) return; const a = ac(), t0 = Math.max(a.currentTime, at || 0), o = a.createOscillator(), g = a.createGain(); o.type = type || 'triangle'; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(v || 0.05, t0 + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(g); g.connect(MG); o.start(t0); o.stop(t0 + d + 0.03); } catch (e) {} }
+  function noiseBuf() { const a = ac(); if (NB) return NB; const n = a.sampleRate * 2; NB = a.createBuffer(1, n, a.sampleRate); const d = NB.getChannelData(0); for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1; return NB; }
+  function sweep(f0, f1, d, v, type, at) { try { if (!S.sound) return; const a = ac(), t0 = Math.max(a.currentTime, at || 0), o = a.createOscillator(), g = a.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f0, t0); o.frequency.exponentialRampToValueAtTime(f1, t0 + d); g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(v, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(g); g.connect(MG); o.start(t0); o.stop(t0 + d + 0.05); } catch (e) {} }
+  function boom(v, at) { try { if (!S.sound) return; const a = ac(), t0 = Math.max(a.currentTime, at || 0), n = a.sampleRate * 0.7, b = a.createBuffer(1, n, a.sampleRate), d = b.getChannelData(0); for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 3); const s = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain(); s.buffer = b; f.type = 'lowpass'; f.frequency.value = 900; g.gain.value = v || 0.25; s.connect(f); f.connect(g); g.connect(MG); s.start(t0); sweep(70, 34, 0.8, (v || 0.25) * 0.9, 'sine', t0); } catch (e) {} }
+  function pad(freqs, d, v, at, bright) { try { if (!S.sound) return; const a = ac(), t0 = Math.max(a.currentTime, at || 0), lp = a.createBiquadFilter(), g = a.createGain(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(bright ? 3200 : 1600, t0); lp.frequency.exponentialRampToValueAtTime(500, t0 + d); g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(v, t0 + 0.06); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d); lp.connect(g); g.connect(MG); freqs.forEach((f) => [-6, 6].forEach((dt) => { const o = a.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.detune.value = dt; o.connect(lp); o.start(t0); o.stop(t0 + d + 0.05); })); } catch (e) {} }
+  function bells(freqs, gap, v, at) { if (!S.sound) return; const a = ac(), t0 = Math.max(a.currentTime, at || 0); freqs.forEach((f, i) => { tone(f, 1.1, v, 'sine', t0 + i * gap); tone(f * 2.76, 0.4, v * 0.25, 'sine', t0 + i * gap); }); }
+  function whoosh(f0, f1, d, v, at) { try { if (!S.sound) return; const a = ac(), t0 = Math.max(a.currentTime, at || 0), s = a.createBufferSource(), bp = a.createBiquadFilter(), g = a.createGain(); s.buffer = noiseBuf(); s.loop = true; bp.type = 'bandpass'; bp.Q.value = 1.2; bp.frequency.setValueAtTime(f0, t0); bp.frequency.exponentialRampToValueAtTime(f1, t0 + d); g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(v, t0 + d * 0.2); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d); s.connect(bp); bp.connect(g); g.connect(MG); s.start(t0); s.stop(t0 + d + 0.05); } catch (e) {} }
+  function riser(T) {
+    try {
+      if (!S.sound) return { stop() {} };
+      const a = ac(), t0 = a.currentTime + 0.02, out = a.createGain(), nodes = [];
+      out.gain.setValueAtTime(0.0001, t0); out.gain.exponentialRampToValueAtTime(0.06, t0 + T * 0.35); out.gain.exponentialRampToValueAtTime(0.55, t0 + T); out.connect(MG);
+      const trem = a.createGain(); trem.gain.value = 0.7; const lfo = a.createOscillator(), lg = a.createGain(); lfo.frequency.setValueAtTime(2.5, t0); lfo.frequency.exponentialRampToValueAtTime(16, t0 + T); lg.gain.value = 0.3; lfo.connect(lg); lg.connect(trem.gain); trem.connect(out); nodes.push(lfo);
+      const lp = a.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 7; lp.frequency.setValueAtTime(260, t0); lp.frequency.exponentialRampToValueAtTime(3800, t0 + T); lp.connect(trem);
+      [[1, -8, 'sawtooth', 0.09], [1, 8, 'sawtooth', 0.09], [0.5, 0, 'sine', 0.16], [1.5, 0, 'triangle', 0.04]].forEach(([m, dt, type, v]) => { const o = a.createOscillator(), og = a.createGain(); o.type = type; o.detune.value = dt; o.frequency.setValueAtTime(98 * m, t0); o.frequency.exponentialRampToValueAtTime(392 * m, t0 + T); og.gain.value = v; o.connect(og); og.connect(lp); nodes.push(o); });
+      const ns = a.createBufferSource(), bp = a.createBiquadFilter(), ng = a.createGain(); ns.buffer = noiseBuf(); ns.loop = true; bp.type = 'bandpass'; bp.Q.value = 1.6; bp.frequency.setValueAtTime(350, t0); bp.frequency.exponentialRampToValueAtTime(7000, t0 + T); ng.gain.value = 0.22; ns.connect(bp); bp.connect(ng); ng.connect(out); nodes.push(ns);
+      nodes.forEach((n) => n.start(t0));
+      let tt = 0.25, iv = 0.62; while (tt < T - 0.12) { const k = tt / T; sweep(78, 38, 0.2, 0.12 + 0.3 * k * k, 'sine', t0 + tt); iv = Math.max(0.13, iv * 0.86); tt += iv; }
+      return { stop(at) { try { const e = Math.max(a.currentTime, at); out.gain.cancelScheduledValues(e); out.gain.setTargetAtTime(0.0001, e, 0.025); nodes.forEach((n) => { try { n.stop(e + 0.25); } catch (er) {} }); } catch (er) {} } };
+    } catch (e) { return { stop() {} }; }
+  }
+  function revealSound(ri, at) {
+    if (!S.sound) return;
+    const a = ac(), t0 = Math.max(a.currentTime, at || 0);
+    if (ri === 7) { sweep(220, 70, 0.9, 0.2, 'sine', t0); tone(147, 0.9, 0.08, 'triangle', t0 + 0.18); tone(110, 1.3, 0.08, 'triangle', t0 + 0.42); whoosh(1800, 120, 0.9, 0.06, t0); return; }
+    sweep(110, 40, 0.7, 0.22, 'sine', t0); whoosh(6000, 300, 0.9, 0.07, t0);
+    if (ri === 0) { tone(523, 0.35, 0.04, 'triangle', t0); return; }
+    const C5 = 523.25, E5 = 659.25, G5 = 783.99, C6 = 1046.5, E6 = 1318.5, G6 = 1568, A4 = 440, D5 = 587.33, B5 = 987.77;
+    if (ri === 1) { bells([E5, B5], 0.09, 0.06, t0); return; }
+    if (ri === 2) { bells([C5, E5, G5, C6], 0.07, 0.06, t0); pad([C5 / 2, G5 / 2], 0.9, 0.03, t0); return; }
+    if (ri === 3) { bells([C5, E5, G5, C6, E6], 0.065, 0.065, t0); pad([C5 / 2, E5 / 2, G5 / 2], 1.6, 0.045, t0, true); boom(0.12, t0); return; }
+    if (ri === 4) { boom(0.3, t0); pad([C5 / 4, C5 / 2, E5 / 2, G5 / 2, C5], 2.4, 0.06, t0, true); bells([G5, C6, E6, G6, E6, G6], 0.08, 0.06, t0 + 0.12); return; }
+    if (ri === 5) { boom(0.4, t0); sweep(55, 27, 1.6, 0.35, 'sine', t0); pad([A4 / 4, A4 / 2, C5 / 2, E5 / 2], 1.1, 0.06, t0, true); pad([A4 / 4, A4 / 2, 554.37 / 2, E5 / 2, A4], 2.6, 0.06, t0 + 0.9, true); for (let i = 0; i < 7; i++) whoosh(3000 + i * 500, 900, 0.09, 0.08, t0 + 0.05 + i * 0.07); bells([A4, 554.37, E5, A4 * 2, 554.37 * 2], 0.09, 0.05, t0 + 0.95); return; }
+    if (ri === 6) { boom(0.45, t0); sweep(50, 25, 2, 0.35, 'sine', t0); pad([C5 / 4, C5 / 2, G5 / 2, E5, G5, B5], 3.4, 0.06, t0, true); for (let i = 0; i < 16; i++) tone([C6, D5 * 2, E6, G6, A4 * 4][i % 5] * (1 + Math.floor(i / 5) * 0.5), 0.5, 0.035, 'sine', t0 + 0.1 + i * 0.06); bells([C6, E6, G6, C6 * 2], 0.14, 0.06, t0 + 1.1); }
+  }
+  // экран: создаётся один раз и живёт, пока открыта вкладка (обновления данных его не пересоздают)
+  function stylePane() {
+    if (ST.el) return ST.el;
+    const el = mkEl('div', 'ss-scr ol on');
+    el.innerHTML = `<div class="ss-stage"><canvas class="ss-cv"></canvas><div class="ss-top"><div class="ss-title"><small>Текущий стиль:</small><div class="ss-tw"></div></div></div>
+      <div class="ss-bottom"><button class="ss-spin" type="button"><b>Крутить</b><small></small></button><p class="ss-note"></p></div></div>
+      <aside class="ss-left"><h4>Ячейки стилей</h4><div class="ss-slots"></div><div class="ss-perk"></div><div class="ss-lv"></div></aside>
+      <aside class="ss-right"><h4>Шансы</h4><div class="ss-odds"></div></aside>`;
+    el.querySelector('.ss-spin').addEventListener('click', stSpin);
+    ST.el = el; el.__refresh = stRefresh;
+    return el;
+  }
+  const $s = (q) => ST.el && ST.el.querySelector(q);
+  function stRefresh() {
+    if (!ST.el) return;
+    if (!stMeta()) { ST.el.classList.add('none'); $s('.ss-note').textContent = 'Стили появятся, когда Экосистема Мастера обновится до v7.5.'; return; }
+    ST.el.classList.remove('none');
+    if (ST.frozen && !ST.spin) { const live = (S.heroes[myHero()] || {}).sty; if ((live && live.slots[0] === ST.frozen.slots[0] && live.spins === ST.frozen.spins) || Date.now() - ST.frozenAt > 9000) ST.frozen = null; }
+    stTop(); stSide(); stOdds(); stBottom(); loadSfx();
+    if (!ST.raf) stLoop();
+  }
+  const stShown = () => { const o = stMine(); return o && o.slots[ST.sel] ? stSty(o.slots[ST.sel]) : null; };
+  function stTop() {
+    if (ST.spin) return;
+    const s = stShown(), o = stMine();
+    stTitle(s ? s.n : (stOpen(o, ST.sel) ? 'пусто' : 'ячейка закрыта'), s ? stRar(s.r)[1] + (s.src ? ' · ' + s.src : '') : '', s ? stRar(s.r)[3] : '#8a9096', '', 0, s && s.r === 's');
+  }
+  function stTitle(n, sub, col, mode, dur, rb) {
+    const tw = $s('.ss-tw'); if (!tw) return;
+    if (!mode) { const cur = tw.querySelector('.ss-ti:not(.out)'); if (cur && cur.dataset.k === n + '|' + sub) return; }
+    const el = mkEl('div', 'ss-ti' + (rb ? ' rb' : '')); el.innerHTML = '<b></b><em></em>'; el.dataset.k = n + '|' + sub;
+    el.querySelector('b').textContent = n; el.querySelector('em').textContent = sub || ''; el.style.setProperty('--tc', col);
+    if (!mode) { tw.innerHTML = ''; tw.appendChild(el); return; }
+    const d = Math.max(0.08, dur || 0.3); el.style.setProperty('--d', d.toFixed(3) + 's');
+    tw.querySelectorAll('.ss-ti:not(.out)').forEach((old) => { old.style.setProperty('--d', Math.max(0.07, Math.min(d * 0.75, 0.38)).toFixed(3) + 's'); old.classList.remove('in', 'fin'); old.classList.add('out'); setTimeout(() => old.remove(), d * 1000 + 120); });
+    const outs = tw.querySelectorAll('.ss-ti.out'); for (let i = 0; i < outs.length - 3; i++) outs[i].remove();
+    el.classList.add(mode); tw.appendChild(el);
+  }
+  function stSide() {
+    const o = stMine(), box = $s('.ss-slots'), M = stMeta(); box.innerHTML = '';
+    if (!o) { $s('.ss-perk').innerHTML = '<p class="ss-empty">Стили пока закрыты.</p>'; $s('.ss-lv').textContent = ''; return; }
+    [0, 1, 2].forEach((i) => {
+      const id = o.slots[i], s = stSty(id), op = stOpen(o, i), a2 = stAct(o, i);
+      const b = mkEl('button', 'ss-slot ' + (!op ? 'lock' : a2 ? 'act' : 'store') + (i === ST.sel ? ' sel' : '') + (ST.swapFrom === i ? ' from' : '')); b.type = 'button';
+      if (s) b.style.setProperty('--rc', stRar(s.r)[3]);
+      b.innerHTML = '<i></i><b></b><small></small>';
+      b.querySelector('i').textContent = ['I', 'II', 'III'][i]; b.querySelector('b').textContent = !op ? '🔒' : s ? s.n : '—';
+      b.querySelector('small').textContent = !op ? 'прокачка ' + M.open[i] : a2 ? (i === 0 ? 'крутится · действует' : 'действует') : 'хранилище';
+      b.disabled = !op || !!ST.spin;
+      b.addEventListener('click', async () => {
+        if (ST.swapFrom != null) { const a = ST.swapFrom; ST.swapFrom = null; if (a !== i) { if (!gmOn()) { note('Мастер сейчас не в сети', 'bad'); stRefresh(); return; } busy('Перекладываю стиль', 'Экосистема Мастера меняет ячейки местами'); if (!(await ask('style', { op: 'swap', a, b: i }))) busy(null); ST.sel = i; } stRefresh(); return; }
+        ST.sel = i; stRefresh();
+      });
+      box.appendChild(b);
+    });
+    const P = $s('.ss-perk'); P.innerHTML = ''; const s = stShown();
+    if (s) {
+      const rr = stRar(s.r); P.style.setProperty('--rc', rr[3]);
+      P.appendChild(mkEl('h5', '', s.n)); P.appendChild(mkEl('small', 'ss-rr', rr[1] + (s.src ? ' · отсылка: «' + s.src + '»' : ''))); P.appendChild(mkEl('p', '', s.d));
+      if (s.auto && s.auto.bf) { const bf = o.bf || { p: 10, n: 0 }, st = mkEl('div', 'ss-bf'); st.innerHTML = '<span>Шанс сейчас</span><b></b><span>Подряд</span><i></i>'; st.querySelector('b').textContent = bf.p + '%'; const pips = st.querySelector('i'); for (let q = 0; q < 4; q++) pips.appendChild(mkEl('u', q < bf.n ? 'on' : '')); P.appendChild(st); }
+      if (s.auto && s.auto.p) P.appendChild(mkEl('small', 'ss-auto', '⚡ срабатывает само в бою: ' + s.auto.p + '% на бросок'));
+      if (s.act && stAct(o, ST.sel)) P.appendChild(mkEl('small', 'ss-auto', '🎲 «' + s.act.label + '» · ' + s.act.p + '% — бросает Мастер'));
+      if (!stAct(o, ST.sel)) P.appendChild(mkEl('small', 'ss-auto', 'Лежит в хранилище — не действует.'));
+    } else P.appendChild(mkEl('p', 'ss-empty', stOpen(o, ST.sel) ? (ST.sel === 0 ? 'Пусто. Покрути стиль — он ляжет сюда.' : 'Пусто. Сюда можно переложить стиль из другой ячейки.') : 'Ячейка закрыта — откроется прокачкой ' + M.open[ST.sel] + '.'));
+    if (stOpen(o, ST.sel) && [0, 1, 2].filter((i) => stOpen(o, i)).length > 1) { const sw = mkEl('button', 'btn ghost ss-swap', ST.swapFrom != null ? 'Выбери ячейку для обмена…' : '⇄ Поменять с другой ячейкой'); sw.type = 'button'; sw.disabled = !!ST.spin || !gmOn(); sw.addEventListener('click', () => { ST.swapFrom = ST.swapFrom != null ? null : ST.sel; stRefresh(); }); P.appendChild(sw); }
+    const lv = $s('.ss-lv'); lv.innerHTML = ''; const pp = mkEl('div', 'ss-pips'); for (let i = 1; i <= 5; i++) pp.appendChild(mkEl('i', i <= o.lvl ? 'on' : '')); const r1 = mkEl('div', 'ss-gr'); r1.append(mkEl('span', '', 'Прокачка'), pp); lv.append(r1, mkEl('small', 'ss-lt', (M.lvlT || [])[o.lvl] || ''));
+  }
+  function stOdds() {
+    const box = $s('.ss-odds'), M = stMeta(); box.innerHTML = '';
+    M.rar.forEach((r) => {
+      const L = M.base.filter((b) => b.r === r[0]), row = mkEl('div', 'ss-or' + (ST.openR[r[0]] ? ' open' : '')); row.style.setProperty('--rc', r[3]);
+      const hd = mkEl('button', 'ss-oh'); hd.type = 'button'; hd.innerHTML = '<i></i><span></span><b></b><em></em>';
+      hd.querySelector('span').textContent = r[1]; hd.querySelector('b').textContent = pct(r[2]); hd.querySelector('em').textContent = L.length ? '▸' : '';
+      if (L.length) hd.addEventListener('click', () => { ST.openR[r[0]] = !ST.openR[r[0]]; stOdds(); }); else hd.disabled = true;
+      row.appendChild(hd);
+      if (ST.openR[r[0]] && L.length) { const ul = mkEl('ul'); L.forEach((b) => { const li = mkEl('li'); li.title = b.d; li.innerHTML = '<span></span><small></small>'; li.querySelector('span').textContent = b.n; li.querySelector('small').textContent = pct(r[2] / L.length); ul.appendChild(li); }); row.appendChild(ul); }
+      box.appendChild(row);
+    });
+    box.appendChild(mkEl('small', 'ss-on', '«Ничего» сжигает стиль в ячейке I.'));
+  }
+  function stBottom() {
+    const o = stMine(), b = $s('.ss-spin'), off = !gmOn();
+    b.querySelector('small').textContent = 'Прокрутки: ' + (o ? o.spins : 0);
+    b.disabled = !!ST.spin || !o || o.lvl < 1 || o.spins < 1 || off;
+    $s('.ss-note').textContent = !o || o.lvl < 1 ? 'Стили закрыты: нужна прокачка 1 — её даёт Мастер.' : o.spins < 1 ? 'Прокруток нет — их выдаёт Мастер.' : off ? 'Крутить можно, когда Мастер в сети.' : 'Новый стиль заменит то, что лежит в ячейке I. «Ничего» сожжёт его.';
+  }
+  async function stSpin() {
+    const o = stMine(); if (ST.spin || !o || o.lvl < 1 || o.spins < 1) return;
+    if (!gmOn()) { note('Мастер сейчас не в сети', 'bad'); return; }
+    ST.frozen = JSON.parse(JSON.stringify(o)); ST.frozen.spins = Math.max(0, o.spins - 1); ST.frozenAt = Date.now();
+    ST.sel = 0; ST.swapFrom = null;
+    const seq = []; let t = 0, dt = 0.075; while (t < SPIN_T) { seq.push({ t, q: stRollLocal() }); t += dt; dt *= 1.075; }
+    ST.spin = { t0: performance.now(), seq, T: t, last: -1, done: false, res: null };
+    try { const a = ac(); ST.spin.snd = riser(t); ST.spin.sfxAt = a.currentTime + 0.02 + t - SFX_PEAK; } catch (e) {}
+    ST.el.classList.add('spinning'); stSide(); stBottom();
+    if (!(await ask('style', { op: 'spin' }))) stAbort();
+  }
+  function stAbort(why) {
+    const sp = ST.spin; if (!sp) return; ST.spin = null; ST.frozen = null;
+    try { if (sp.snd) sp.snd.stop(ac().currentTime); } catch (e) {}
+    if (ST.el) ST.el.classList.remove('spinning'); if (why) note(why, 'bad'); stRefresh();
+  }
+  function stResult(a) {
+    const r = a.result || {}, op = a.payload && a.payload.op;
+    if (op === 'swap') { busy(null); note(r.ok ? 'Готово ✓ Ячейки поменялись' : 'Не вышло: ' + (r.why || 'неизвестно'), r.ok ? 'good' : 'bad'); soft(); return; }
+    if (op === 'spin' && ST.spin && !ST.spin.res) {
+      if (!r.ok) { stAbort('Не крутится: ' + (r.why || 'неизвестно')); return; }
+      ST.spin.res = { id: r.id || null, r: r.r, prev: r.prev || null };
+      // свой звук получения ставим так, чтобы его пик совпал с раскрытием
+      try { const a2 = ac(), left = ST.spin.T - (performance.now() - ST.spin.t0) / 1000; if (left > SFX_PEAK - 0.1) playSfx(a2.currentTime + left - SFX_PEAK, 0.95); else ST.spin.lateSfx = true; } catch (e) {}
+    }
+  }
+  function stTick(now) {
+    const sp = ST.spin, el = (now - sp.t0) / 1000;
+    // ответ ещё не пришёл — продолжаем мелькать, пока не придёт
+    const T = sp.res ? Math.max(sp.T, sp.tRes || sp.T) : Infinity;
+    if (!sp.res && el > sp.T + 20) { stAbort('Экосистема Мастера не ответила — попробуй ещё раз'); return; }
+    if (sp.res && !sp.tRes) { sp.tRes = Math.max(sp.T, el + (el > sp.T ? 0.6 : 0)); if (sp.lateSfx) try { playSfx(ac().currentTime + Math.max(0, sp.tRes - el - SFX_PEAK), 0.95); } catch (e) {} }
+    if (el < T) {
+      let idx = 0; for (let i = 0; i < sp.seq.length; i++) if (sp.seq[i].t <= el) idx = i;
+      if (el > sp.T) { idx = sp.seq.length + Math.floor((el - sp.T) / 0.42); if (!sp.ex || sp.ex.length <= idx) { sp.ex = sp.ex || []; while (sp.ex.length <= idx) sp.ex.push(stRollLocal()); } }
+      if (idx !== sp.last) {
+        sp.last = idx; const q = idx < sp.seq.length ? sp.seq[idx].q : sp.ex[idx], s = q.id ? stSty(q.id) : null, nx = sp.seq[idx + 1], dur = idx < sp.seq.length ? Math.min(0.5, Math.max(0.08, ((nx ? nx.t : sp.T) - sp.seq[idx].t) * 0.95)) : 0.38;
+        stTitle(s ? s.n : 'Ничего', stRar(q.r)[1], stRar(q.r)[3], 'in', dur, q.r === 's'); sp.cur = q.r;
+      }
+      return;
+    }
+    if (!sp.done) {
+      sp.done = true; sp.tEnd = now; sp.cur = sp.res.r;
+      const ri = stRI(sp.res.r), s = stSty(sp.res.id), prev = sp.res.prev;
+      if (ST.frozen) { ST.frozen.slots[0] = sp.res.id; ST.frozenAt = Date.now(); }
+      stTitle(s ? s.n : 'Ничего', s ? stRar(s.r)[1] + (s.src ? ' · ' + s.src : '') : (prev ? '«' + ((stSty(prev) || {}).n || '') + '» сгорел' : 'пусто'), stRar(sp.res.r)[3], 'fin', 0.8, sp.res.r === 's');
+      try { const a = ac(); if (sp.snd) sp.snd.stop(a.currentTime); revealSound(ri, a.currentTime); } catch (e) {}
+      stSide(); stBottom();
+      const E = ST.el; E.classList.remove('spinning'); E.classList.add('reveal', 'tier' + ri); setTimeout(() => E.classList.remove('reveal'), 900);
+      if (ri >= 4 && sp.res.r !== 'x') { E.classList.remove('shake'); void E.offsetWidth; E.classList.add('shake'); buzz([40, 30, 60]); }
+      stBurst(ri);
+      setTimeout(() => { E.classList.remove('tier' + ri); ST.spin = null; stRefresh(); }, 1300);
+    }
+  }
+  function stBurst(ri) { const n = ri >= 6 ? 160 : ri >= 4 ? 110 : ri === 7 ? 40 : 60; for (let i = 0; i < n; i++) { const a = rnd() * TAU, v = 120 + rnd() * (ri >= 4 ? 520 : 300); ST.parts.push({ x: 0, y: -0.25, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60, life: 0.8 + rnd() * 0.8, g: 380, c: ri === 7 ? '#3a3f46' : ri === 6 ? ['#ff5a6a', '#ffd36a', '#6ad7ff', '#c38cff'][i % 4] : stRar(ST.spin ? ST.spin.res.r : 'c')[3], r: 1 + rnd() * 2.4 }); } }
+  const motes = Array.from({ length: 60 }, () => ({ x: rnd() - 0.5, y: rnd(), v: 0.02 + rnd() * 0.05, r: 0.6 + rnd() * 1.8, p: rnd() * TAU }));
+  const RB = ['#ff5a6a', '#ffd36a', '#6ad7ff', '#c38cff'], NR = 16;
+  function stLoop() {
+    const cv = $s('.ss-cv'); if (!cv) return;
+    const t0 = performance.now(); let last = t0;
+    ST.VS = ST.VS || { main: rgbOf('#59606a'), rays: Array.from({ length: NR }, () => rgbOf('#59606a')), inten: 0.15, z: 1, vig: 0, rot: 0, out: 0 };
+    const VS = ST.VS;
+    (function fr(now) {
+      if (!ST.el || (!ST.el.isConnected && !ST.spin)) { ST.raf = 0; return; }
+      const dt = Math.min(0.05, (now - last) / 1000); last = now; const t = (now - t0) / 1000;
+      if (ST.spin) stTick(now);
+      if (!ST.el.isConnected) { ST.raf = requestAnimationFrame(fr); return; }
+      const dpr = Math.min(2, devicePixelRatio || 1), W = cv.clientWidth, H = cv.clientHeight;
+      if (!W || !H) { ST.raf = requestAnimationFrame(fr); return; }
+      if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+      const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const sp = ST.spin, s = stShown(), rk = sp ? (sp.cur || 'c') : s ? s.r : null, ri = rk ? stRI(rk) : -1, tcol = rk ? stRar(rk)[3] : '#59606a';
+      const dark = sp && !sp.done, p = dark ? Math.min(1, (now - sp.t0) / 1000 / sp.T) : 0;
+      const kc = 1 - Math.exp(-dt * 5.5), kz = 1 - Math.exp(-dt * (dark ? 12 : 3.2)), kv = 1 - Math.exp(-dt * (dark ? 8 : 3));
+      const tm = rgbOf(tcol); VS.main = VS.main.map((v, i) => v + (tm[i] - v) * kc);
+      VS.rays = VS.rays.map((rc, i) => { const tg = rgbOf(ri === 6 ? RB[i % 4] : tcol); return rc.map((v, j) => v + (tg[j] - v) * kc); });
+      const tInt = ri < 0 ? 0.15 : ri === 7 ? 0.12 : 0.25 + Math.min(6, ri) * 0.1; VS.inten += ((dark ? tInt * (0.75 + 0.5 * p) : tInt) - VS.inten) * kc;
+      const ez = p * p * (3 - 2 * p);
+      VS.z += ((dark ? 1 + 0.62 * Math.pow(ez, 1.4) : 1) - VS.z) * kz;
+      VS.vig += ((dark ? 0.25 + 0.72 * Math.pow(p, 1.3) : 0) - VS.vig) * kv;
+      VS.out += ((dark ? 1 + 1.6 * p : 1) - VS.out) * kz;
+      VS.rot += dt * (0.08 + (dark ? 1.4 * p * p : 0));
+      const col = toHex(VS.main);
+      const L = lookOf(myHero()), E = window.EkLook, rs = L && E && E.RACES[L.race] ? E.RACES[L.race].sc * (L.ht || 1) : 1;
+      const hh = Math.min(H * 0.5, W * 0.45) * Math.min(1, 1.08 / rs), fy = H * 0.78, gy = fy + H * 0.02, cx = W / 2, cy = H * 0.47;
+      const fyy = gy - hh * 0.62, sh = dark ? Math.pow(p, 3) * 3.5 : 0;
+      c.save(); c.translate(cx + (Math.random() - 0.5) * sh * 2, fyy + (Math.random() - 0.5) * sh * 2); c.scale(VS.z, VS.z); c.translate(-cx, -fyy);
+      let g = c.createRadialGradient(W / 2, H * 0.45, 10, W / 2, H * 0.5, Math.hypot(W, H) * 0.6); g.addColorStop(0, '#1b1f26'); g.addColorStop(1, '#050608'); c.fillStyle = g; c.fillRect(-W, -H, W * 3, H * 3);
+      g = c.createLinearGradient(0, fy, 0, H); g.addColorStop(0, '#15181d'); g.addColorStop(1, '#07080a'); c.fillStyle = g; c.fillRect(-W, fy, W * 3, H * 2);
+      c.strokeStyle = 'rgba(255,255,255,.035)'; c.lineWidth = 1; for (let i = -12; i <= 12; i++) { c.beginPath(); c.moveTo(W / 2 + i * 40, fy); c.lineTo(W / 2 + i * 160, H); c.stroke(); } for (let j = 1; j < 6; j++) { const y = fy + (H - fy) * Math.pow(j / 6, 1.6); c.beginPath(); c.moveTo(-W, y); c.lineTo(W * 2, y); c.stroke(); }
+      const R = Math.max(W, H) * 0.75, inten = VS.inten;
+      c.save(); c.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < NR; i++) { const a = (i / NR) * TAU + VS.rot * (i % 2 ? 1 : -0.6), w = 0.05 + 0.03 * Math.sin(t * 1.3 + i), rc = toHex(VS.rays[i]);
+        const gr = c.createRadialGradient(cx, cy, 0, cx, cy, R); gr.addColorStop(0, hexA(rc, inten)); gr.addColorStop(0.55, hexA(rc, inten * 0.15)); gr.addColorStop(1, hexA(rc, 0)); c.fillStyle = gr;
+        c.beginPath(); c.moveTo(cx, cy); c.arc(cx, cy, R, a - w, a + w); c.closePath(); c.fill(); }
+      g = c.createRadialGradient(cx, cy, 0, cx, cy, H * 0.38); g.addColorStop(0, hexA(col, (dark ? 0.32 + 0.3 * p : 0.3) * (ri < 0 ? 0.4 : 1))); g.addColorStop(1, hexA(col, 0)); c.fillStyle = g; c.fillRect(-W, -H, W * 3, H * 3);
+      c.restore();
+      motes.forEach((m) => { m.y -= m.v * dt * (1 + p * 5); if (m.y < 0) { m.y = 1; m.x = rnd() - 0.5; } const x = cx + m.x * W * 0.6, y = H * 0.15 + m.y * H * 0.7; c.globalAlpha = 0.25 + 0.35 * Math.abs(Math.sin(t + m.p)); c.fillStyle = ri >= 0 && ri !== 7 ? col : '#9aa3ad'; c.beginPath(); c.arc(x, y, m.r, 0, TAU); c.fill(); });
+      c.globalAlpha = 1;
+      g = c.createRadialGradient(cx, gy, 2, cx, gy, hh * 0.35); g.addColorStop(0, 'rgba(0,0,0,.7)'); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.beginPath(); c.ellipse(cx, gy, hh * 0.35, hh * 0.06, 0, 0, TAU); c.fill();
+      if (E && L) E.draw(c, cx, gy, hh, L, { t, dark: dark ? '#06070a' : null, out: dark ? hexA(col, 0.9) : '#07080a', ow: dark ? Math.max(2, hh * 0.008) * VS.out : null, eyes: dark ? col : null });
+      ST.parts = ST.parts.filter((q) => q.life > 0); ST.parts.forEach((q) => { q.x += q.vx * dt / W; q.y += q.vy * dt / H; q.vy += q.g * dt; q.life -= dt * 0.8; c.globalAlpha = Math.max(0, q.life); c.fillStyle = q.c; c.beginPath(); c.arc(cx + q.x * W, cy + q.y * H, q.r, 0, TAU); c.fill(); }); c.globalAlpha = 1;
+      c.restore();
+      if (VS.vig > 0.005) { const r0 = Math.min(W, H) * (0.62 - 0.36 * Math.min(1, VS.vig)), r1 = Math.hypot(W, H) * 0.62; g = c.createRadialGradient(cx, H * 0.45, r0, cx, H * 0.45, r1); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.55, 'rgba(0,0,0,' + (0.55 * VS.vig).toFixed(3) + ')'); g.addColorStop(1, 'rgba(0,0,0,' + Math.min(0.97, VS.vig).toFixed(3) + ')'); c.fillStyle = g; c.fillRect(0, 0, W, H); }
+      if (sp && sp.done) { const k = Math.max(0, 1 - (now - sp.tEnd) / 600); if (k > 0) { c.fillStyle = hexA(sp.res.r === 'x' ? '#000000' : ri === 6 ? '#ffffff' : stRar(sp.res.r)[3], k * (sp.res.r === 'x' ? 0.6 : 0.55)); c.fillRect(0, 0, W, H); } }
+      ST.raf = requestAnimationFrame(fr);
+    })(t0);
+  }
+
+  // ---------- заметки: личный блокнот и общая доска ----------
+  const NT = { el: null, st: 'off', err: '', tab: store.get('ek_nt_tab', 'book'), book: null, base: null, cur: null, view: store.get('ek_bview', null), ch: null, busy: false, ctl: null, bookT: 0 };
+  const NOTAB = (e) => /42P01|PGRST20[0-9]|relation .*notes.* does not exist|Could not find the table/i.test(((e && (e.code || '')) + ' ' + (e && e.message || '')));
+  const ntDirty = () => !!(NT.base && NT.cur) && EkNotes.diff(NT.base, NT.cur).n > 0;
+  const ntDraft = () => { try { store.set('ek_board_draft', { base: NT.base, cur: NT.cur, me: myHero() }); } catch (e) {} };
+  const ntName = (k) => (k === 'main' ? 'Мастер' : heroName(k));
+  const ntAsk = (t) => Promise.resolve(window.confirm(t));
+  const blankBook = () => ({ pages: [{ id: EkNotes.uid(), ti: '', tx: '', t: Date.now() }], at: 0 });
+  async function ntInit() {
+    if (NT.st === 'on' || NT.st === 'load' || !window.EkNotes) return;
+    NT.st = 'load'; const me = myHero();
+    try {
+      const { data, error } = await sb.from('notes').select('*');
+      if (error) throw error;
+      const rows = {}; (data || []).forEach((r) => { rows[r.id] = r; });
+      const bk = rows['book:' + me] && rows['book:' + me].data;
+      NT.book = bk && Array.isArray(bk.pages) && bk.pages.length ? { pages: bk.pages, at: store.get('ek_book_at', 0) } : blankBook();
+      const doc = EkNotes.fixBoard(rows.board ? rows.board.data : {});
+      // несохранённый черновик доски переживает перезагрузку страницы
+      const dr = store.get('ek_board_draft', null);
+      if (dr && dr.me === me && dr.base && dr.cur && EkNotes.diff(EkNotes.fixBoard(dr.base), EkNotes.fixBoard(dr.cur)).n) { NT.base = EkNotes.clone(doc); NT.cur = EkNotes.apply(doc, EkNotes.diff(EkNotes.fixBoard(dr.base), EkNotes.fixBoard(dr.cur))); }
+      else { NT.base = EkNotes.clone(doc); NT.cur = EkNotes.clone(doc); }
+      NT.st = 'on';
+      if (!NT.ch) NT.ch = sb.channel('notes').on('postgres_changes', { event: '*', schema: 'public', table: 'notes' }, (p) => ntRow(p.new)).subscribe();
+    } catch (e) {
+      NT.st = NOTAB(e) ? 'nosql' : 'err'; NT.err = e.message || String(e);
+      NT.book = store.get('ek_book_local', null) || blankBook();    // пока облако не готово — блокнот хранится на этом устройстве
+    }
+    ntPaint();
+  }
+  function ntRow(row) {
+    if (!row || !row.id) return;
+    const me = myHero();
+    if (row.id === 'board') {
+      const doc = EkNotes.fixBoard(row.data || {});
+      const ops = NT.base && NT.cur ? EkNotes.diff(NT.base, NT.cur) : { n: 0 };
+      NT.base = EkNotes.clone(doc); NT.cur = ops.n ? EkNotes.apply(doc, ops) : EkNotes.clone(doc);
+      if (NT.ctl && NT.tab === 'board') { NT.ctl.refresh(); ntSave(); }
+    } else if (row.id === 'book:' + me && row.data && Array.isArray(row.data.pages) && row.data.pages.length) {
+      if (Date.now() - NT.bookT < 4000) return;   // своё же эхо
+      const at = NT.book ? NT.book.at : 0; NT.book = { pages: row.data.pages, at: Math.min(at | 0, row.data.pages.length - 1) };
+      if (NT.tab === 'book') ntRemountBook();
+    }
+  }
+  let bookT = 0;
+  function bookChanged() {
+    store.set('ek_book_at', NT.book.at);
+    if (NT.st !== 'on') { store.set('ek_book_local', NT.book); return; }
+    clearTimeout(bookT); bookT = setTimeout(async () => {
+      NT.bookT = Date.now();
+      const r = await sb.from('notes').upsert({ id: 'book:' + myHero(), data: { pages: NT.book.pages }, updated_at: new Date().toISOString() });
+      if (r.error) note('Блокнот не сохранился: ' + r.error.message, 'bad');
+    }, 1200);
+  }
+  async function boardSave() {
+    if (NT.busy || NT.st !== 'on') return;
+    NT.busy = true; ntSave();
+    try {
+      const { data, error } = await sb.from('notes').select('data').eq('id', 'board').maybeSingle(); if (error) throw error;
+      const doc = EkNotes.apply(data ? data.data : {}, EkNotes.diff(NT.base, NT.cur)), clean = { notes: doc.notes, threads: doc.threads };
+      const r = await sb.from('notes').upsert({ id: 'board', data: clean, updated_at: new Date().toISOString() }); if (r.error) throw r.error;
+      NT.base = EkNotes.clone(clean); NT.cur = EkNotes.clone(clean); ntDraft();
+      if (NT.ctl) NT.ctl.refresh();
+      note('Сохранено ✓ Доска обновилась у всех', 'good'); beep(660, 0.15, 0.05); setTimeout(() => beep(990, 0.2, 0.05), 110); buzz(30);
+    } catch (e) { note('Доска не сохранилась: ' + (e.message || e) + '. Черновик остался', 'bad'); }
+    NT.busy = false; ntSave();
+  }
+  function ntSave() {
+    if (!NT.el) return; const b = NT.el.querySelector('.bd-save'), st = NT.el.querySelector('.bd-st'); if (!b) return;
+    const d = ntDirty(); b.disabled = !d || NT.busy; st.textContent = NT.busy ? 'Сохраняю…' : d ? 'Есть несохранённые правки — их пока видишь только ты' : 'Всё сохранено · все видят то же'; st.classList.toggle('warn', d);
+    const t = NT.el.querySelector('.nt-tabs [data-nt=board]'); if (t) t.classList.toggle('dirty', d);
+  }
+  function notesPane() {
+    if (NT.el) return NT.el;
+    NT.el = mkEl('div', 'nt-pane'); NT.el.__refresh = () => { if (NT.st === 'off') ntInit(); };
+    ['keydown', 'keyup'].forEach((ev) => NT.el.addEventListener(ev, (e) => e.stopPropagation()));
+    ntPaint(); return NT.el;
+  }
+  function ntRemountBook() { if (NT.tab !== 'book' || !NT.el) return false; if (document.activeElement && NT.el.contains(document.activeElement)) return false; ntPaint(); return true; }
+  function ntPaint() {
+    const B = NT.el; if (!B) return; B.innerHTML = ''; NT.ctl = null;
+    const tb = mkEl('div', 'nt-tabs');
+    [['book', '📓 Личный блокнот'], ['board', '📌 Общая доска']].forEach(([id, t]) => { const b = mkEl('button', id === NT.tab ? 'on' : '', t); b.type = 'button'; b.dataset.nt = id; b.addEventListener('click', () => { if (NT.tab === id) return; NT.tab = id; store.set('ek_nt_tab', id); ntPaint(); }); tb.appendChild(b); });
+    B.appendChild(tb);
+    if (NT.st === 'off' || NT.st === 'load' || !NT.book) { B.appendChild(mkEl('div', 'empty', 'Открываю заметки…')); return; }
+    if (NT.st !== 'on') B.appendChild(mkEl('p', 'nt-warn', NT.st === 'nosql' ? 'Заметки в облаке ещё не включены (Мастеру нужно запустить файл 03_zametki.sql). Пока блокнот хранится только на этом устройстве, а общей доски нет.' : 'Нет связи с заметками: ' + NT.err));
+    const me = myHero();
+    if (NT.tab === 'book') {
+      NT.ctl = EkNotes.mountBook(B, { book: NT.book, color: heroCol(me), confirm: ntAsk, hint: 'Личный блокнот: его видишь только ты (и Мастер). Пишется само — сохранять не нужно.', onChange: bookChanged });
+      return;
+    }
+    if (NT.st !== 'on') return;
+    if (!NT.view) NT.view = { z: 0.5, x: 40, y: 20 };
+    const sv = mkEl('button', 'btn primary bd-save', '☁ Сохранить'), st = mkEl('span', 'bd-st'); sv.type = 'button'; sv.addEventListener('click', boardSave);
+    NT.ctl = EkNotes.mountBoard(B, { doc: () => NT.cur, view: NT.view, nm: ntName, col: (k) => heroCol(k), authors: null, author: () => me, setAuthor() {}, confirm: ntAsk,
+      prefs: { get: (k, d) => store.get('ek_bd_' + k, d), set: (k, v) => store.set('ek_bd_' + k, v) }, extra: [sv, st],
+      hint: 'Тяни доску, колёсико или щипок — приблизить. Двойной щелчок по доске — новый листочек. Листочек тянется за любое место, размер — за уголок. Нажми на листочек — писать. Правки увидят все после «Сохранить».',
+      onChange: () => { ntDraft(); ntSave(); }, onView: () => store.set('ek_bview', NT.view) });
+    ntSave();
+  }
+  addEventListener('beforeunload', (e) => { if (ntDirty()) { e.preventDefault(); e.returnValue = ''; } });
   setInterval(() => { if (S.prof && S.prof.role !== 'pending' && (S.tab === 'event' || S.tab === 'rolls')) { const a = document.activeElement; if (!a || a.tagName !== 'INPUT') render(); } }, 15000);
   start().catch((e) => { app.innerHTML = '<div class="boot">Ошибка: ' + esc(e.message || e) + '</div>'; });
 })();
