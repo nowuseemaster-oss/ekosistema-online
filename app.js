@@ -163,12 +163,15 @@
   async function ask(kind, payload) {
     const me = myHero(); if (!me) return false;
     if (!gmOn()) { note('Мастер сейчас не в сети — попробуй, когда он подключится', 'bad'); return false; }
-    const { error } = await sb.from('actions').insert({ hero: me, kind, payload });
+    let { error } = await sb.from('actions').insert({ hero: me, kind, payload });
+    // облик героя и стили — новые виды просьб; если база их ещё не знает, отправляем внутри «облика кубика» (Мастер v7.6 поймёт)
+    if (error && (kind === 'look' || kind === 'style') && !/EK_TOO_FAST/.test(error.message)) ({ error } = await sb.from('actions').insert({ hero: me, kind: 'skin', payload: Object.assign({ sub: kind }, payload) }));
     if (error) { note(/EK_TOO_FAST/.test(error.message) ? 'Слишком часто — подожди немного' : 'Не получилось: ' + error.message, 'bad'); return false; }
     return true;
   }
   function onResult(a) {
     const r = a.result || {};
+    if (a.kind === 'skin' && a.payload && a.payload.sub) a = Object.assign({}, a, { kind: a.payload.sub });
     if (a.kind === 'skin') { if (!r.ok) { S.skWant = null; busy(null); note('Облик не сменился: ' + (r.why || 'неизвестно'), 'bad'); } else { clearTimeout(S.busyT); S.busyT = setTimeout(() => { S.skWant = null; busy(null); soft(); }, 5000); } soft(); }
     if (a.kind === 'inv') {
       busy(null);
@@ -187,7 +190,7 @@
     }
     if (a.kind === 'look') { busy(null); if (r.ok) { note('Облик сохранён ✓', 'good'); beep(660, 0.15, 0.05); setTimeout(() => beep(990, 0.2, 0.05), 110); buzz(30); } else note('Облик не сохранился: ' + (r.why || 'неизвестно'), 'bad'); soft(); }
     if (a.kind === 'style') stResult(a);
-    if (a.kind === 'pumpkin') { busy(null); if (r.ok) { note('🎃 +' + r.n + ' 🍬 — тыква поймана!', 'good'); beep(880, 0.2); setTimeout(() => beep(1320, 0.3), 120); buzz([40, 30, 40]); } else note('Тыква: ' + (r.why || 'не засчитана'), 'bad'); }
+    if (a.kind === 'pumpkin') { busy(null); if (r.ok) { note(r.pot ? '🎃 +' + r.n + ' 🍬 в общий котёл!' + (r.left != null ? ' Сегодня ещё ' + r.left : '') : '🎃 +' + r.n + ' 🍬 — тыква поймана!', 'good'); beep(880, 0.2); setTimeout(() => beep(1320, 0.3), 120); buzz([40, 30, 40]); } else note('Тыква: ' + (r.why || 'не засчитана'), 'bad'); }
   }
   // ---------- тыквы на экране ----------
   const PKdone = new Set(store.get('ek_pk', [])), PKel = {};
@@ -471,7 +474,7 @@
     return `<div class="card evh"><b>🎃 Ночь Тонкой Грани</b><span>ещё ${Math.ceil((E.end - Date.now()) / 86400000)} дн.</span></div>
       <h3>Прилавок Тыквенного торговца <small>новый товар через ${mm}:${String(ss).padStart(2, '0')}</small></h3>
       <div class="grid">${(E.lots || []).map(lot).join('')}</div>
-      <p class="note">${off ? 'Покупать можно, когда Мастер в сети.' : 'Покупай прямо отсюда — конфеты спишутся сами.'} А тыквы иногда прилетают прямо на этот экран — лови их, это конфеты!</p>
+      <p class="note">${off ? 'Покупать можно, когда Мастер в сети.' : 'Покупай прямо отсюда — конфеты спишутся сами.'} А тыквы иногда прилетают прямо на этот экран — лови их: всё пойманное сразу идёт в общий котёл (до 40 🍬 в день).</p>
       <h3>Мои сладости и предметы <small>🍬 ${H.candy || 0}</small></h3>${hwItems(H)}
       <h3>Общий котёл · ${E.pot.n} 🍬</h3><div class="bar"><i style="width:${Math.min(100, E.pot.n / lastT * 100).toFixed(1)}%"></i></div>
       <ul class="thr">${pt.map(([n, t]) => `<li class="${E.pot.got.includes(n) ? 'got' : ''}"><b>${n}</b><span>${esc(t)}</span></li>`).join('')}<li class="${E.pot.box ? 'got' : ''}"><b>+${E.boxStep}</b><span>потом — Ящик Тонкой Грани каждому${E.pot.box ? ' (выдано: ' + E.pot.box + ')' : ''}</span></li></ul>
