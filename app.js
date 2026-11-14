@@ -235,6 +235,37 @@
   const soft = () => { clearTimeout(softT); softT = setTimeout(render, 60); };
 
   // ---------- экраны ----------
+  const visTabs = () => TABS.filter(([id]) => id !== 'event' || (S.game.hw && S.game.hw.live));
+  // ---------- свайпы между разделами (телефон) ----------
+  //  Влево — следующий раздел, вправо — предыдущий. Не мешает: доске, блокноту, полям ввода,
+  //  лентам, которые сами листаются вбок, и системному жесту «назад» у края экрана.
+  function goTab(d) {
+    const L = visTabs(), i = L.findIndex(([id]) => id === S.tab), j = i + d;
+    if (i < 0 || j < 0 || j >= L.length) return false;
+    S.tab = L[j][0]; store.set('ek_tab', S.tab); window.scrollTo(0, 0); render(); buzz(8);
+    const pane = app.querySelector('#pane'); if (pane) { pane.classList.remove('sw-l', 'sw-r'); void pane.offsetWidth; pane.classList.add(d > 0 ? 'sw-l' : 'sw-r'); clearTimeout(S.swT); S.swT = setTimeout(() => pane.classList.remove('sw-l', 'sw-r'), 340); }
+    return true;
+  }
+  (function swipes() {
+    let st = null;
+    const NO = 'input, textarea, select, button.ss-spin, .bd-view, .nb-wrap, .tabs, [data-noswipe]';
+    const blocked = (el) => { for (let e = el; e && e !== app && e.nodeType === 1; e = e.parentElement) { if (e.matches(NO)) return true; const ox = getComputedStyle(e).overflowX; if ((ox === 'auto' || ox === 'scroll') && e.scrollWidth > e.clientWidth + 2) return true; } return false; };
+    app.addEventListener('touchstart', (e) => {
+      st = null;
+      if (e.touches.length !== 1 || S.busy || !S.prof || S.prof.role === 'pending' || !app.querySelector('#pane')) return;
+      const t = e.touches[0]; if (t.clientX < 20 || t.clientX > innerWidth - 20) return;
+      if (!blocked(e.target)) st = { x: t.clientX, y: t.clientY, t: Date.now() };
+    }, { passive: true });
+    app.addEventListener('touchmove', (e) => { if (st && e.touches.length > 1) st = null; }, { passive: true });
+    app.addEventListener('touchend', (e) => {
+      if (!st) return; const t = e.changedTouches[0], dx = t.clientX - st.x, dy = t.clientY - st.y, dt = Date.now() - st.t; st = null;
+      if (dt > 650 || Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.7) return;
+      if (goTab(dx < 0 ? 1 : -1) && !store.get('ek_sw_seen', false)) { store.set('ek_sw_seen', true); }
+    }, { passive: true });
+    app.addEventListener('touchcancel', () => { st = null; }, { passive: true });
+    // один раз подсказать на телефоне, что разделы листаются пальцем
+    setTimeout(() => { try { if (!matchMedia('(pointer: coarse)').matches || store.get('ek_sw_seen', false) || !app.querySelector('#pane')) return; store.set('ek_sw_seen', true); const h = document.createElement('div'); h.className = 'sw-hint'; h.textContent = '← листай пальцем между разделами →'; document.body.appendChild(h); setTimeout(() => h.remove(), 3500); } catch (e) {} }, 2500);
+  })();
   function render() {
     if (!S.prof || S.prof.role === 'pending') return;
     const me = myHero(), H = S.heroes[me] || {}, F = S.game.fight, c = curTurn(F), myTurn = c && c.kind === 'pl' && c.key === me;
@@ -247,7 +278,7 @@
     </header>
     ${gmOff ? `<div class="offline">Мастер сейчас не в сети — здесь то, что он отправил последним${S.game.gm.t ? ' (' + esc(ago(S.game.gm.t)) + ')' : ''}.</div>` : ''}
     ${myTurn ? '<div class="turn">⚔ ТВОЙ ХОД</div>' : ''}`;
-    const tabs = TABS.filter(([id]) => id !== 'event' || (S.game.hw && S.game.hw.live));
+    const tabs = visTabs();
     if (!tabs.find(([id]) => id === S.tab)) S.tab = 'rolls';
     const nav = `<nav class="tabs">${tabs.map(([id, ic, t]) => `<button data-t="${id}" class="${S.tab === id ? 'on' : ''}"><i>${ic}</i><span>${t}</span>${id === 'fight' && myTurn ? '<em></em>' : ''}${id === 'bag' && S.dr.moves.length ? '<em class="dr"></em>' : ''}</button>`).join('')}</nav>`;
     const rich = { style: stylePane, notes: notesPane }[S.tab];

@@ -111,6 +111,10 @@ var EkNotes = (function () {
     });
     wrap.addEventListener('pointerdown', (e) => e.stopPropagation());
     wrap.addEventListener('wheel', (e) => { if (e.target.closest('textarea') && e.target.scrollHeight > e.target.clientHeight) return; if (Math.abs(e.deltaY) < 30) return; e.preventDefault(); turn(e.deltaY > 0 ? 1 : -1); }, { passive: false });
+    // на телефоне — листать пальцем: влево — дальше, вправо — назад (пока не пишешь)
+    let tsw = null;
+    wrap.addEventListener('touchstart', (e) => { const t = e.touches[0], typing = document.activeElement && page.contains(document.activeElement) && e.target.closest('textarea,input'); tsw = e.touches.length === 1 && !typing ? [t.clientX, t.clientY, Date.now()] : null; }, { passive: true });
+    wrap.addEventListener('touchend', (e) => { if (!tsw) return; const t = e.changedTouches[0], dx = t.clientX - tsw[0], dy = t.clientY - tsw[1], ok = Date.now() - tsw[2] < 650 && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.6; tsw = null; if (ok) turn(dx < 0 ? 1 : -1); }, { passive: true });
     show();
     // чужая правка (с другого устройства) — перерисовать, если сейчас не печатают
     return { refresh() { if (busy || (document.activeElement && page.contains(document.activeElement))) return false; bk.at = Math.max(0, Math.min(bk.pages.length - 1, bk.at | 0)); show(); return true; } };

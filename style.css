@@ -6,7 +6,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; background: radial-gradient(ellipse at 50% -20%, var(--glow) 0%, var(--bg) 62%) fixed, var(--bg); transition: background-color .6s; color: var(--ink); font: 400 15px/1.45 Inter, system-ui, sans-serif; -webkit-tap-highlight-color: transparent; }
 body { min-height: 100vh; }
-#ekfx { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; transition: opacity .6s ease; }
+#ekfx { position: fixed; left: 0; top: 0; width: 100%; height: 100vh; height: 100lvh; z-index: 0; pointer-events: none; transition: opacity .6s ease; }
 #ekfx.out { opacity: 0; } #ekfx.still { opacity: .6; }
 #app { position: relative; z-index: 1; }
 h1, h2, h3 { font-family: Lora, Georgia, serif; font-weight: 400; margin: 0; }
@@ -597,3 +597,13 @@ html.bd-dragging { cursor: grabbing; }
 .nt-pane .nb-cover { height: max(380px, calc(100vh - var(--hdh, 62px) - var(--nvh, 64px) - 170px)); }
 .nt-pane .btn { height: 36px; padding: 0 14px; }
 @media (max-width: 560px) { .nb-cover { padding-left: 40px; } .nb-page { left: 40px; right: 16px; } .nb-rings { left: 18px; } .nb-ti { font-size: 21px; } .nb-tx { font-size: 17px; } .bd-zoom { margin-left: 0; } }
+
+/* ================= v7.6: телефон — фон не прыгает при прокрутке, свайпы между разделами ================= */
+/* градиент — отдельный неподвижный слой высотой с самый большой экран: адресная строка его больше не двигает */
+html { background: var(--bg); } body { background: transparent; }
+body::before { content: ''; position: fixed; left: 0; top: 0; width: 100%; height: 100vh; height: 100lvh; z-index: -1; pointer-events: none; background: radial-gradient(ellipse at 50% -20%, var(--glow) 0%, var(--bg) 62%); }
+#pane.sw-l > * { animation: swL .3s cubic-bezier(.2,.8,.3,1); } #pane.sw-r > * { animation: swR .3s cubic-bezier(.2,.8,.3,1); }
+@keyframes swL { from { transform: translateX(16%); opacity: .15; } to { transform: none; opacity: 1; } }
+@keyframes swR { from { transform: translateX(-16%); opacity: .15; } to { transform: none; opacity: 1; } }
+.sw-hint { position: fixed; left: 50%; bottom: calc(var(--nvh, 64px) + 14px); z-index: 12; transform: translateX(-50%); padding: 7px 14px; border-radius: 999px; background: color-mix(in srgb, var(--bg) 86%, transparent); border: 1px solid var(--rule); color: var(--ink2); font: 600 12.5px Inter, sans-serif; pointer-events: none; animation: swHint 3.4s ease forwards; white-space: nowrap; }
+@keyframes swHint { 0% { opacity: 0; transform: translate(-50%, 8px); } 10%, 80% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; } }

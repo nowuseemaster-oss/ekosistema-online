@@ -11,6 +11,8 @@
   const STARS = { t: 'stars', n: 90 };
   const T = {
     classic: ['Классика', '#d9b26a', '#7fd1c7', '#071012', '#12323a', [{ t: 'glow', y: 1.1, col: '#1d6b6b', a: 0.35 }, { t: 'p', n: 34, shape: 'dot', col: ['#7fd1c7', '#bfe8e0'], s: [1, 2.4], vy: [-9, -3], vx: [-3, 3], a: [0.2, 0.6], tw: 1 }]],
+    emerald: ['Изумруд', '#6ff2a8', '#2fcf86', '#04100a', '#0d3a26', [{ t: 'glow', y: 1.1, col: '#14a05a', a: 0.32 }, { t: 'p', n: 16, shape: 'shard', col: ['#0e5a36', '#137a48', '#0a4a2c'], edge: '#8affc4', s: [8, 20], vy: [-7, -2], vx: [-4, 4], rot: [-0.5, 0.5], a: [0.35, 0.7] }, { t: 'p', n: 34, shape: 'star4', col: ['#d6ffe8', '#8affc4', '#ffffff'], s: [1.5, 4], vy: [0, 0], a: [0, 1], tw: 1.6 }]],
+    sapphire: ['Сапфир', '#8ec2ff', '#4a7cf0', '#040915', '#10255a', [{ t: 'glow', y: 1.1, col: '#1c4ab8', a: 0.34 }, { t: 'p', n: 16, shape: 'shard', col: ['#10285e', '#173a8a', '#0c1f4a'], edge: '#9cc6ff', s: [8, 20], vy: [-7, -2], vx: [-4, 4], rot: [-0.5, 0.5], a: [0.35, 0.7] }, { t: 'p', n: 34, shape: 'star4', col: ['#e0ecff', '#9cc6ff', '#ffffff'], s: [1.5, 4], vy: [0, 0], a: [0, 1], tw: 1.6 }]],
     marble: ['Мрамор', '#e8c47a', '#e2d8c6', '#14110d', '#3a3226', [{ t: 'veins', col: '#d9b26a', n: 7 }, { t: 'p', n: 40, shape: 'dot', col: ['#ffe2a0', '#f5cd6a'], s: [0.8, 2], vy: [-6, -1], vx: [-4, 4], a: [0.2, 0.7], tw: 1 }]],
     wood: ['Дерево Бездны', '#e0a860', '#b5895a', '#120c07', '#3a2414', [{ t: 'grain', col: '#6a4424' }, { t: 'p', n: 36, shape: 'dot', col: ['#ffcf8a', '#d9a05a'], s: [1, 2.6], vy: [-8, -2], vx: [-6, 6], sw: 12, a: [0.15, 0.5] }]],
     bone: ['Кость', '#eadfc8', '#b8ab92', '#121110', '#34302a', [{ t: 'cracks', col: '#b8ab92', a: 0.22, n: 6 }, { t: 'p', n: 40, shape: 'dot', col: ['#eadfc8'], s: [0.6, 1.6], vy: [2, 8], vx: [-3, 3], a: [0.15, 0.45] }]],
@@ -68,7 +70,19 @@
   const c = cv.getContext('2d');
   let W = 0, H = 0, DPR = 1, cur = null, layers = [], on = true, run = false, last = 0, tt = 0;
   const reduce = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } })();
-  function size() { DPR = Math.min(window.devicePixelRatio || 1, 1.5); W = innerWidth; H = innerHeight; cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR); c.setTransform(DPR, 0, 0, DPR, 0, 0); layers.forEach((l) => l.init && l.init()); bake(); }
+  // На телефоне при прокрутке прячется и появляется адресная строка: высота окна «прыгает», ширина — нет.
+  //  Раньше на каждый такой прыжок фон собирался заново, и частицы телепортировались. Теперь холст берётся
+  //  с запасом по высоте (на всю высоту экрана) и пересобирается, только если поменялась ширина или поворот.
+  const touchDev = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch (e) { return false; } })();
+  function size(force) {
+    const nw = innerWidth, nh = innerHeight;
+    const tall = touchDev ? Math.min(Math.round(nh * 1.4), Math.max(Math.round(nh * 1.12), (window.screen && screen.height) || 0)) : nh;
+    if (!force && W && Math.abs(nw - W) < 2 && (touchDev ? nh <= H : nh === H)) return false;
+    const sameW = Math.abs(nw - W) < 2;
+    DPR = Math.min(window.devicePixelRatio || 1, 1.5); W = nw; H = touchDev && sameW ? Math.max(tall, H) : tall;
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR); cv.style.height = H + 'px'; c.setTransform(DPR, 0, 0, DPR, 0, 0); layers.forEach((l) => l.init && l.init()); bake();
+    return true;
+  }
   const spr = {};
   function glowSprite(col) { // мягкое круглое свечение, нарисованное один раз
     if (spr[col]) return spr[col];
@@ -209,7 +223,7 @@
   function build(id) {
     cur = T[id] || T.classic; layers = [];
     cur[5].forEach((o) => { if (o.t === 'p') layers.push(Particles(o)); else if (LIVE[o.t]) layers.push(LIVE[o.t](o)); });
-    size();
+    size(true);
   }
   function frame(now) {
     if (!run) return;
@@ -270,7 +284,7 @@
     cv.classList.remove('still');
     if (!run) { run = true; last = performance.now(); requestAnimationFrame(frame); }
   }
-  addEventListener('resize', () => { if (cur) { size(); if (!run) draw(0); } });
+  addEventListener('resize', () => { if (cur && size() && !run) draw(0); });
   window.EkTheme = {
     set, burst, list: T, name: (id) => (T[id] || T.classic)[0], accent: () => (cur ? [cur[1], cur[2]] : ['#d9b26a', '#7fd1c7']),
     fx(v) { on = !!v; try { localStorage.setItem('ek_fx', on ? '1' : '0'); } catch (e) {} run = false; start(); },
