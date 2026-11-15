@@ -192,6 +192,12 @@
     if (a.kind === 'style') stResult(a);
     if (a.kind === 'pumpkin') { busy(null); if (r.ok) { note(r.pot ? '🎃 +' + r.n + ' 🍬 в общий котёл!' + (r.left != null ? ' Сегодня ещё ' + r.left : '') : '🎃 +' + r.n + ' 🍬 — тыква поймана!', 'good'); beep(880, 0.2); setTimeout(() => beep(1320, 0.3), 120); buzz([40, 30, 40]); } else note('Тыква: ' + (r.why || 'не засчитана'), 'bad'); }
   }
+  // ---------- графика: авто / красиво / плавно ----------
+  function gfxOpt() {
+    const T = window.EkTheme; if (!T || !T.gfx) return '';
+    const m = T.gfxMode, q = T.quality, now = q === 0 ? 'всё красиво' : q === 1 ? 'облегчённо' : q === 2 ? 'облегчённо, фон реже' : 'облегчённо, фон стоит';
+    return `<label class="gfx">Графика <select id="gfx"><option value="auto"${m === 'auto' ? ' selected' : ''}>Авто</option><option value="pretty"${m === 'pretty' ? ' selected' : ''}>Красиво</option><option value="smooth"${m === 'smooth' ? ' selected' : ''}>Плавно</option></select><small>${m === 'auto' ? 'Сама подстраивается под устройство · сейчас: ' + now : m === 'smooth' ? 'Без размытий и тяжёлых эффектов — для слабых устройств' : 'Все эффекты, даже если устройство не успевает'}</small></label>`;
+  }
   // ---------- тыквы на экране ----------
   const PKdone = new Set(store.get('ek_pk', [])), PKel = {};
   const PKSVG = '<svg viewBox="0 0 60 60"><path d="M30 10 q2 -8 8 -9" stroke="#5a3a1a" stroke-width="3" fill="none"/><ellipse cx="30" cy="34" rx="24" ry="20" fill="#ff8a1e"/><ellipse cx="30" cy="34" rx="9" ry="20" fill="#ffa040" opacity=".55"/><path d="M17 30 l6 -6 l5 6z M33 30 l6 -6 l5 6z" fill="#ffe27a"/><path d="M18 40 q12 10 24 0 l-4 3 l-3 -3 l-3 4 l-3 -4 l-3 3 l-4 -3z" fill="#ffe27a"/></svg>';
@@ -301,6 +307,7 @@
     const snd = app.querySelector('#snd'); if (snd) snd.addEventListener('change', () => { S.sound = snd.checked; store.set('ek_sound', S.sound); if (S.sound) beep(660, 0.2); });
     const out = app.querySelector('#out'); if (out) out.addEventListener('click', () => sb.auth.signOut());
     const fxo = app.querySelector('#fxo'); if (fxo) fxo.addEventListener('change', () => window.EkTheme && window.EkTheme.fx(fxo.checked));
+    const gfo = app.querySelector('#gfx'); if (gfo) gfo.addEventListener('change', () => { if (window.EkTheme && window.EkTheme.gfx) window.EkTheme.gfx(gfo.value); render(); });
     app.querySelectorAll('.bi[data-bi]').forEach((b) => b.addEventListener('click', () => openItem(b.dataset.bi)));
     const dsv = app.querySelector('#drSave'); if (dsv) dsv.addEventListener('click', drSave);
     const dun = app.querySelector('#drUndo'); if (dun) dun.addEventListener('click', () => { S.dr.moves = []; render(); });
@@ -376,7 +383,7 @@
       ${(H.ach || []).length && achOpen() ? `<div class="achs">${H.ach.slice(0, 60).map((a) => `<div class="ach lv${a.lv}" title="${esc(a.d)}"><i class="${String(a.ic || '').length > 3 ? 'l4' : String(a.ic || '').length > 2 ? 'l3' : String(a.ic || '').length > 1 ? 'l2' : ''}">${esc(a.ic)}</i><div><b>${esc(a.t)}</b><small>${esc(a.d)}</small></div></div>`).join('')}</div>` : (H.ach || []).length ? '' : '<div class="empty sm">Пока ни одного. Всё впереди.</div>'}
       ${vSkins(H)}
       ${vSpecials(H)}
-      <div class="card opts"><label><input type="checkbox" id="snd" ${S.sound ? 'checked' : ''}> Звук при бросках и «твой ход»</label><label><input type="checkbox" id="fxo" ${!window.EkTheme || window.EkTheme.fxOn ? 'checked' : ''}> Живой фон</label><button class="btn ghost" id="out">Выйти из аккаунта</button></div>`;
+      <div class="card opts"><label><input type="checkbox" id="snd" ${S.sound ? 'checked' : ''}> Звук при бросках и «твой ход»</label><label><input type="checkbox" id="fxo" ${!window.EkTheme || window.EkTheme.fxOn ? 'checked' : ''}> Живой фон</label>${gfxOpt()}<button class="btn ghost" id="out">Выйти из аккаунта</button></div>`;
   }
   function vSkins(H) {
     const L = H.skins || [], cur = H.skin || 'classic', off = !gmOn();

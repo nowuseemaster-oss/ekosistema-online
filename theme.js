@@ -70,6 +70,17 @@
   const cv = document.createElement('canvas'); cv.id = 'ekfx'; cv.setAttribute('aria-hidden', 'true');
   const c = cv.getContext('2d');
   let W = 0, H = 0, DPR = 1, cur = null, layers = [], on = true, run = false, last = 0, tt = 0;
+  // ---------- плавность ----------
+  //  Q: 0 — всё красиво; 1 — облегчённо (без размытия под карточками, фон в обычной чёткости);
+  //     2 — фон ещё и реже (15 кадров); 3 — фон замирает. В режиме «Авто» Q подбирается сам по тому,
+  //     успевает ли устройство рисовать кадры, и запоминается. «Красиво» и «Плавно» — вручную.
+  let gfx = 'auto', Q = 0, hold = 0, qStep = 0;
+  try { gfx = localStorage.getItem('ek_gfx') || 'auto'; } catch (e) {}
+  const weak = (() => { try { return (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 2) || (navigator.deviceMemory && navigator.deviceMemory <= 2); } catch (e) { return false; } })();
+  let qSaved = 0; try { const v = JSON.parse(localStorage.getItem('ek_perfq') || 'null'); if (v && Date.now() - v.t < 14 * 864e5) qSaved = v.q | 0; } catch (e) {}
+  Q = gfx === 'pretty' ? 0 : gfx === 'smooth' ? 2 : Math.max(qSaved, weak ? 1 : 0);
+  const liteCls = () => document.documentElement.classList.toggle('lite', Q >= 1);
+  liteCls();
   const reduce = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } })();
   // На телефоне при прокрутке прячется и появляется адресная строка: высота окна «прыгает», ширина — нет.
   //  Раньше на каждый такой прыжок фон собирался заново, и частицы телепортировались. Теперь холст берётся
@@ -80,7 +91,7 @@
     const tall = touchDev ? Math.min(Math.round(nh * 1.4), Math.max(Math.round(nh * 1.12), (window.screen && screen.height) || 0)) : nh;
     if (!force && W && Math.abs(nw - W) < 2 && (touchDev ? nh <= H : nh === H)) return false;
     const sameW = Math.abs(nw - W) < 2;
-    DPR = Math.min(window.devicePixelRatio || 1, 1.5); W = nw; H = touchDev && sameW ? Math.max(tall, H) : tall;
+    DPR = Math.min(window.devicePixelRatio || 1, Q >= 1 ? 1 : 1.5); W = nw; H = touchDev && sameW ? Math.max(tall, H) : tall;
     cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR); cv.style.height = H + 'px'; c.setTransform(DPR, 0, 0, DPR, 0, 0); layers.forEach((l) => l.init && l.init()); bake();
     return true;
   }
@@ -226,11 +237,28 @@
     cur[5].forEach((o) => { if (o.t === 'p') layers.push(Particles(o)); else if (LIVE[o.t]) layers.push(LIVE[o.t](o)); });
     size(true);
   }
+  // следим за кадрами: если устройство не успевает — облегчаем (только в «Авто»)
+  const iv = []; let prevNow = 0;
+  function watch(now) {
+    const d = now - prevNow; prevNow = now;
+    if (d <= 0) return;
+    if (gfx !== 'auto' || Q >= 3 || hold > 0 || document.hidden || d > 500) { iv.length = 0; return; }
+    iv.push(d); if (iv.length < 90) return;
+    const srt = iv.slice().sort((a, b) => a - b), med = srt[iv.length >> 1], lim = Math.max(med * 1.7, 24);
+    const jank = iv.filter((x) => x > lim).length / iv.length; iv.length = 0;
+    if ((jank > 0.18 || med > 40) && now - qStep > 3000) {
+      qStep = now; Q++; liteCls(); size(true);
+      try { localStorage.setItem('ek_perfq', JSON.stringify({ q: Q, t: Date.now() })); } catch (e) {}
+      if (Q >= 3) { run = false; draw(0); }
+    }
+  }
+  let looping = false;   // один цикл кадров, сколько бы раз фон ни перезапускали
   function frame(now) {
-    if (!run) return;
+    if (!run) { looping = false; return; }
     requestAnimationFrame(frame);
     if (document.hidden) return;
-    if (now - last < 32) return; // ~30 кадров в секунду — бережём батарею
+    watch(now);
+    if (hold > 0 || now - last < (Q >= 2 ? 64 : 32)) return; // ~30 кадров (на слабых — 15), пока рисуют пальцем — пауза
     const dt = Math.min(0.1, (now - last) / 1000 || 0.03); last = now; tt += dt;
     draw(dt);
   }
@@ -283,15 +311,29 @@
     if (!document.body.contains(cv)) document.body.prepend(cv);
     if (!on || reduce) { run = false; cv.classList.toggle('still', !on); draw(0); return; }
     cv.classList.remove('still');
-    if (!run) { run = true; last = performance.now(); requestAnimationFrame(frame); }
+    if (Q >= 3) { run = false; draw(0); return; }
+    if (!run) { run = true; last = performance.now(); draw(0); if (!looping) { looping = true; requestAnimationFrame(frame); } }
   }
   addEventListener('resize', () => { if (cur && size() && !run) draw(0); });
   window.EkTheme = {
     set, burst, list: T, name: (id) => (T[id] || T.classic)[0], accent: () => (cur ? [cur[1], cur[2]] : ['#d9b26a', '#7fd1c7']),
     fx(v) { on = !!v; try { localStorage.setItem('ek_fx', on ? '1' : '0'); } catch (e) {} run = false; start(); },
-    get fxOn() { return on; }
+    get fxOn() { return on; },
+    // графика: 'auto' | 'pretty' | 'smooth'
+    gfx(m) {
+      gfx = m === 'pretty' || m === 'smooth' ? m : 'auto';
+      try { localStorage.setItem('ek_gfx', gfx); if (gfx !== 'auto') localStorage.removeItem('ek_perfq'); } catch (e) {}
+      Q = gfx === 'pretty' ? 0 : gfx === 'smooth' ? 2 : (weak ? 1 : 0); iv.length = 0;
+      liteCls(); size(true); run = false; start();
+    },
+    get gfxMode() { return gfx; }, get quality() { return Q; },
+    // на время рисования пальцем фон замирает — пальцу достаётся всё время устройства
+    hold(v) { hold = Math.max(0, hold + (v ? 1 : -1)); }
   };
   try { on = localStorage.getItem('ek_fx') !== '0'; } catch (e) {}
   let saved = 'classic'; try { saved = localStorage.getItem('ek_skin') || 'classic'; } catch (e) {}
   if (document.body) set(saved); else addEventListener('DOMContentLoaded', () => set(saved));
+  // пока страница грузится, фон стоит; оживает через секунду после загрузки
+  hold++; const wake = () => setTimeout(() => { hold = Math.max(0, hold - 1); }, 900);
+  if (document.readyState === 'complete') wake(); else addEventListener('load', wake);
 })();
