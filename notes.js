@@ -158,17 +158,34 @@ var EkNotes = (function () {
       inkRender(bc, bk2, ta, tb2, p.ink || [], W, H, off - OY, skip); bc.restore(); bk2.restore();
       baseOff = off; dirty = false; baseSkip = skip ? [...skip].join(',') : '';
     }
+    // Пока ведут линию, перерисовывается только прямоугольник вокруг неё, а не вся страница —
+    //  на телефонах и слабых ноутбуках линия идёт за пальцем без задержки.
+    let fullNext = true;
     function frame() {
       raf = 0; if (!W && !place()) return;
       const ink = p.ink || [], run = cur && cur.b === 'marker' ? markerRun(ink, cur.c, cur.o) : null, key = run ? [...run].join(',') : '';
-      if (dirty || baseOff !== ed.scrollTop || baseSkip !== key) rebase(run);
-      tClear(mc); tClear(kc); mc.save(); mc.setTransform(1, 0, 0, 1, 0, 0); mc.drawImage(base, 0, 0); mc.restore(); kc.save(); kc.setTransform(1, 0, 0, 1, 0, 0); kc.drawImage(baseK, 0, 0); kc.restore();
+      let full = fullNext || !cur;
+      if (dirty || baseOff !== ed.scrollTop || baseSkip !== key) { rebase(run); full = true; }
+      fullNext = false;
+      let rx = 0, ry = 0, rw = W, rh = H;
+      if (!full && cur && cur.bb) {
+        const k = W / 2000, pad = Math.max(0.6, cur.w * W / 10000) * 3 + 6, offY = ed.scrollTop - OY;
+        rx = Math.max(0, Math.floor(cur.bb[0] * k - pad)); ry = Math.max(0, Math.floor(cur.bb[1] * k - offY - pad));
+        rw = Math.min(W, Math.ceil(cur.bb[2] * k + pad)) - rx; rh = Math.min(H, Math.ceil(cur.bb[3] * k - offY + pad)) - ry;
+        if (rw <= 0 || rh <= 0) return;
+      }
+      const dx = Math.floor(rx * dpr), dy = Math.floor(ry * dpr), dw = Math.min(base.width - dx, Math.ceil(rw * dpr) + 2), dh = Math.min(base.height - dy, Math.ceil(rh * dpr) + 2);
+      const blit = (c, src) => { c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(dx, dy, dw, dh); if (dw > 0 && dh > 0) c.drawImage(src, dx, dy, dw, dh, dx, dy, dw, dh); c.restore(); };
+      const tcl = (c) => { c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(dx, dy, dw, dh); c.restore(); };
+      const box = (c) => { if (!full) { c.beginPath(); c.rect(rx, ry, rw, rh); c.clip(); } };
+      const comp = (m, t, o) => { m.save(); m.globalAlpha = o / 100; m.setTransform(1, 0, 0, 1, 0, 0); if (dw > 0 && dh > 0) m.drawImage(t.canvas, dx, dy, dw, dh, dx, dy, dw, dh); m.restore(); };
+      blit(mc, base); blit(kc, baseK);
       if (!cur || cur.p.length < 2) return;
       const off = ed.scrollTop - OY;
-      mc.save(); kc.save(); clip(mc); clip(kc);
+      mc.save(); kc.save(); clip(mc); clip(kc); box(mc); box(kc);
       if (cur.b === 'eraser') { inkErase(mc, cur, W, H, off); inkErase(kc, cur, W, H, off); }
-      else if (cur.b === 'marker') { tClear(ta); [...run].sort((x, y) => x - y).forEach((i) => inkShape(ta, ink[i], W, H, off)); inkShape(ta, cur, W, H, off); compose(kc, ta, cur.o); }
-      else { tClear(tb2); if (inkShape(tb2, cur, W, H, off)) compose(mc, tb2, cur.o); }
+      else if (cur.b === 'marker') { tcl(ta); ta.save(); box(ta); [...run].sort((x, y) => x - y).forEach((i) => inkShape(ta, ink[i], W, H, off)); inkShape(ta, cur, W, H, off); ta.restore(); comp(kc, ta, cur.o); }
+      else { tcl(tb2); tb2.save(); box(tb2); const ok = inkShape(tb2, cur, W, H, off); tb2.restore(); if (ok) comp(mc, tb2, cur.o); }
       mc.restore(); kc.restore();
     }
     const redraw = (full) => { if (full) dirty = true; if (!raf) raf = requestAnimationFrame(frame); };
@@ -178,31 +195,34 @@ var EkNotes = (function () {
     if (!live) return { redraw, setMode() {}, cv };
     // ввод: одним пальцем/пером/мышью — рисовать; двумя пальцами — листать страницу
     const ptrs = new Map(); let lastX = 0, lastY = 0, two = null;
-    const toN = (e) => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / W * 2000, (e.clientY - r.top - OY + ed.scrollTop) / W * 2000]; };
+    const toN = (e, r) => { r = r || cv.getBoundingClientRect(); return [(e.clientX - r.left) / W * 2000, (e.clientY - r.top - OY + ed.scrollTop) / W * 2000]; };
+    const grow = (q, x, y) => { const b = q.bb || (q.bb = [x, y, x, y]); if (x < b[0]) b[0] = x; if (y < b[1]) b[1] = y; if (x > b[2]) b[2] = x; if (y > b[3]) b[3] = y; };
+    let held = false; const holdBg = (v) => { if (v === held) return; held = v; try { if (window.EkTheme && window.EkTheme.hold) window.EkTheme.hold(v); } catch (e) {} };
     cv.addEventListener('pointerdown', (e) => {
       if (!cv.classList.contains('on') || (e.button && e.button !== 0)) return;
       e.preventDefault(); e.stopPropagation(); try { cv.setPointerCapture(e.pointerId); } catch (er) {}
       ctl.down && ctl.down();
       ptrs.set(e.pointerId, [e.clientX, e.clientY]);
-      if (ptrs.size >= 2) { cur = null; two = { y: [...ptrs.values()].reduce((s2, v) => s2 + v[1], 0) / ptrs.size, st: ed.scrollTop }; redraw(); return; }
+      if (ptrs.size >= 2) { cur = null; holdBg(false); two = { y: [...ptrs.values()].reduce((s2, v) => s2 + v[1], 0) / ptrs.size, st: ed.scrollTop }; redraw(); return; }
       const st = ctl.state(), [x, y] = toN(e);
       cur = { b: st.b, c: st.c, w: Math.max(1, Math.round(st.w / W * 10000)), o: st.b === 'eraser' ? 100 : st.o, p: [Math.round(x), Math.round(y)] };
-      lastX = Math.round(x); lastY = Math.round(y); redraw();
+      lastX = Math.round(x); lastY = Math.round(y); grow(cur, lastX, lastY); fullNext = true; holdBg(true); redraw();
     });
     cv.addEventListener('pointermove', (e) => {
       if (!ptrs.has(e.pointerId)) return;
       ptrs.set(e.pointerId, [e.clientX, e.clientY]);
       if (two) { const y = [...ptrs.values()].reduce((s2, v) => s2 + v[1], 0) / ptrs.size; ed.scrollTop = two.st - (y - two.y); return; }
       if (!cur) return;
-      const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-      (evs.length ? evs : [e]).forEach((ev) => { const [x, y] = toN(ev), X = Math.round(x), Y = Math.round(y); if (Math.hypot(X - lastX, Y - lastY) * W / 2000 < 1.2) return; cur.p.push(X - lastX, Y - lastY); lastX = X; lastY = Y; });
+      const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e], rc = cv.getBoundingClientRect();
+      (evs.length ? evs : [e]).forEach((ev) => { const [x, y] = toN(ev, rc), X = Math.round(x), Y = Math.round(y); if (Math.hypot(X - lastX, Y - lastY) * W / 2000 < 1.2) return; cur.p.push(X - lastX, Y - lastY); lastX = X; lastY = Y; grow(cur, X, Y); });
       redraw();
     });
     const up = (e) => {
       if (!ptrs.has(e.pointerId)) return; ptrs.delete(e.pointerId);
       if (ptrs.size) return;
+      holdBg(false);
       if (two) { two = null; return; }
-      const q = cur; cur = null; if (!q) return;
+      const q = cur; cur = null; if (!q) return; delete q.bb;
       if (q.p.length === 2) q.p.push(1, 0);   // точка
       if (!ctl.add(q)) { redraw(); return; }
       redraw(true);

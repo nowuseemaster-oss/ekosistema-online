@@ -215,12 +215,13 @@ body.shake #app { animation: shake .45s; }
 .spc.base.bad { background: linear-gradient(180deg, rgba(224, 100, 90, .14), rgba(255,255,255,.02)); border-color: rgba(224, 100, 90, .35); } .spc.base.bad i { color: var(--red); text-shadow: 0 0 14px rgba(224, 100, 90, .6); }
 .spc.lock { background: rgba(255,255,255,.02); border: 1px dashed var(--rule); opacity: .55; } .spc.lock i { color: var(--ink2); text-shadow: none; }
 /* тыквы и всплывашки */
-.pk { position: fixed; left: 0; top: 0; z-index: 35; width: 72px; height: 72px; padding: 0; border: 0; background: none; cursor: pointer; animation: pkin .5s cubic-bezier(.2, 1.4, .4, 1); -webkit-tap-highlight-color: transparent; }
-.pk svg { width: 100%; height: 100%; filter: drop-shadow(0 0 14px rgba(255, 150, 40, .75)); animation: pkglow 1.4s ease-in-out infinite; }
+.pk { position: fixed; left: 0; top: 0; z-index: 35; width: 72px; height: 72px; padding: 0; border: 0; background: none; cursor: pointer; animation: pkin .5s cubic-bezier(.2, 1.4, .4, 1); -webkit-tap-highlight-color: transparent; will-change: transform; contain: layout style; }
+.pk::before { content: ''; position: absolute; inset: -22px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 170, 60, .75) 0%, rgba(255, 150, 40, .35) 38%, rgba(255, 150, 40, 0) 70%); animation: pkglow 1.4s ease-in-out infinite; will-change: opacity, transform; pointer-events: none; }
+.pk svg { position: relative; width: 100%; height: 100%; }
 .pk i { position: absolute; inset: -14px; border-radius: 50%; border: 2px solid rgba(255, 190, 90, .5); animation: pkring 1.6s ease-out infinite; }
 .pk.got { animation: pkgot .45s ease-in forwards; pointer-events: none; } .pk.bye { animation: pkbye .6s ease-in forwards; pointer-events: none; }
 @keyframes pkin { from { scale: 0; } to { scale: 1; } } @keyframes pkgot { to { scale: 1.8; opacity: 0; } } @keyframes pkbye { to { scale: .2; opacity: 0; } }
-@keyframes pkglow { 50% { filter: drop-shadow(0 0 24px rgba(255, 170, 60, 1)); } } @keyframes pkring { from { transform: scale(.6); opacity: .9; } to { transform: scale(1.4); opacity: 0; } }
+@keyframes pkglow { 0%, 100% { opacity: .55; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.12); } } @keyframes pkring { from { transform: scale(.6); opacity: .9; } to { transform: scale(1.4); opacity: 0; } }
 .ptoast { position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom)); z-index: 45; transform: translateX(-50%); max-width: calc(100vw - 32px); padding: 10px 16px; border-radius: 14px; background: color-mix(in srgb, var(--bg) 90%, transparent); border: 1px solid var(--rule); color: var(--ink); font-size: 14px; font-weight: 600; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,.4); animation: stoast 3.6s ease forwards; }
 .ptoast.good { border-color: rgba(255, 179, 71, .6); } .ptoast.bad { border-color: rgba(224, 100, 90, .55); }
 .spc.more { grid-column: 1 / -1; padding: 8px; font-size: 12px; color: var(--ink2); }
@@ -697,3 +698,22 @@ body::before { content: ''; position: fixed; left: 0; top: 0; width: 100%; heigh
 .nb-pclose { margin-left: auto; height: 32px; font: 600 13px Inter, sans-serif; }
 .nb-keys { width: min(760px, 100%); margin: -2px auto 8px; font: 500 12px Inter, sans-serif; color: rgba(239,230,212,.6); text-align: center; }
 .nb-keys[hidden] { display: none; }
+
+/* ---------- плавность: облегчённая графика (сама включается на слабых устройствах или в настройках) ---------- */
+html.lite *, html.lite *::before, html.lite *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+html.lite .card { background: color-mix(in srgb, color-mix(in srgb, var(--bg) 86%, #ffffff) 88%, transparent); }
+html.lite .top, html.lite .tabs { background: color-mix(in srgb, var(--bg) 97%, transparent); }
+html.lite #busy { background: color-mix(in srgb, var(--bg) 88%, rgba(0,0,0,.7)); }
+html.lite .qz-bg, html.lite .lk-sheet { background: rgba(0,0,0,.78); }
+html.lite .d20 img { animation: none; }
+html.lite .d20.roll-in img { animation: drollLite .9s cubic-bezier(.2, .9, .25, 1.15) both; }
+html.lite .d20.roll-in b { animation: dnum .9s ease both; }
+@keyframes drollLite { 0% { transform: translateY(-60px) rotate(-420deg) scale(.35); opacity: 0; } 55% { opacity: 1; } 75% { transform: translateY(6px) rotate(8deg) scale(1.08); } 100% { transform: none; } }
+html.lite #busy.done .bdie img { animation: bswapLite .9s cubic-bezier(.2, 1.3, .4, 1) both; }
+@keyframes bswapLite { 0% { transform: rotate(-200deg) scale(.3); } 60% { transform: rotate(10deg) scale(1.15); } 100% { transform: none; } }
+html.lite .lvfx > div { animation: lvinLite .9s cubic-bezier(.2, 1.4, .4, 1) both; }
+@keyframes lvinLite { 0% { transform: scale(.3); opacity: 0; } 100% { transform: none; opacity: 1; } }
+html.lite .pk::before { animation: none; opacity: .8; }
+#busy .bdie img, #busy .bdie i { will-change: transform; }
+.opts select { margin-left: 6px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--rule); background: color-mix(in srgb, var(--bg) 80%, #000); color: var(--ink); font: inherit; }
+.opts .gfx small { display: block; color: var(--ink2); font-size: 12px; margin-top: 2px; }
