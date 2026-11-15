@@ -275,6 +275,27 @@ var EkNotes = (function () {
     return S;
   }
   const shelfT = (S) => Math.max(0, ...normShelf(S).books.map((b) => Math.max(0, ...b.pages.map((p) => +p.t || 0))));
+  // «отпечаток» содержимого полки: без того, какая страница открыта, — чтобы не слать облаку простое листание
+  const shelfSig = (S) => { try { return JSON.stringify((S && S.books || []).map((b) => [b.id, b.name, b.c, b.bt || 0, b.pages])); } catch (e) { return String(Math.random()); } };
+  // Два человека писали в один блокнот одновременно (игрок и Мастер): сливаем постранично.
+  //  База — свежая версия из облака; моя страница побеждает, только если я правил её позже.
+  //  Название и цвет переплёта — у того, кто менял их позже. Мои новые блокноты и страницы добавляются.
+  function mergeShelf(mine, cloud) {
+    const A = normShelf(clone(mine)), O = normShelf(clone(cloud));
+    A.books.forEach((ab) => {
+      const ob = O.books.find((x) => x.id === ab.id);
+      if (!ob) { if (O.books.length < 30) O.books.push(ab); return; }
+      if ((ab.bt || 0) > (ob.bt || 0)) { ob.name = ab.name; ob.c = ab.c; ob.bt = ab.bt; }
+      ab.pages.forEach((ap, i) => {
+        const j = ob.pages.findIndex((x) => x.id === ap.id);
+        if (j < 0) ob.pages.splice(Math.min(i, ob.pages.length), 0, ap);
+        else if ((+ap.t || 0) > (+ob.pages[j].t || 0)) ob.pages[j] = ap;
+      });
+      ob.at = Math.max(0, Math.min(ob.pages.length - 1, ab.at | 0));
+    });
+    if (O.books.some((b) => b.id === A.cur)) O.cur = A.cur;
+    return O;
+  }
   //  o: { book: полка, onChange(), confirm(text, opts) → Promise<bool>, prompt(text, val) → Promise<string|null>, rustle(len, hi), hint, color }
   function mountBook(B, o) {
     const SH = normShelf(o.book);
@@ -299,14 +320,14 @@ var EkNotes = (function () {
       nw.addEventListener('click', async () => {
         if (shelf.books.length >= 30) return;
         const name = await ask('Как назвать новый блокнот?', 'Блокнот ' + (shelf.books.length + 1)); if (name == null) return;
-        const keys = Object.keys(COVER), b = { id: uid(), name: String(name).trim().slice(0, 40) || 'Блокнот', c: keys[shelf.books.length % keys.length], pages: [{ id: uid(), ti: '', html: '', tx: '', t: Date.now() }], at: 0 };
+        const keys = Object.keys(COVER), b = { id: uid(), name: String(name).trim().slice(0, 40) || 'Блокнот', c: keys[shelf.books.length % keys.length], pages: [{ id: uid(), ti: '', html: '', tx: '', t: Date.now() }], at: 0, bt: Date.now() };
         shelf.books.push(b); bk = b; shelf.cur = b.id; rustle(0.3, 2000); save(); paintShelf(); show();
       });
       bar.appendChild(nw);
       const ed = h('span', 'nb-bked');
       const rn = h('button', 'nb-ic', '✎'); rn.type = 'button'; rn.title = 'Переименовать блокнот';
-      rn.addEventListener('click', async () => { const n = await ask('Новое название блокнота', bk.name); if (n == null) return; bk.name = String(n).trim().slice(0, 40) || bk.name; save(); paintShelf(); });
-      const cc = h('span', 'nb-cc'); Object.keys(COVER).forEach((c) => { const b = h('button', c === bk.c ? 'on' : ''); b.type = 'button'; b.title = COVER[c][1] + ' переплёт'; b.style.background = COVER[c][0]; b.addEventListener('click', () => { bk.c = c; save(); paintShelf(); wrap.style.setProperty('--bc', COVER[c][0]); }); cc.appendChild(b); });
+      rn.addEventListener('click', async () => { const n = await ask('Новое название блокнота', bk.name); if (n == null) return; bk.name = String(n).trim().slice(0, 40) || bk.name; bk.bt = Date.now(); save(); paintShelf(); });
+      const cc = h('span', 'nb-cc'); Object.keys(COVER).forEach((c) => { const b = h('button', c === bk.c ? 'on' : ''); b.type = 'button'; b.title = COVER[c][1] + ' переплёт'; b.style.background = COVER[c][0]; b.addEventListener('click', () => { bk.c = c; bk.bt = Date.now(); save(); paintShelf(); wrap.style.setProperty('--bc', COVER[c][0]); }); cc.appendChild(b); });
       const dl = h('button', 'nb-ic', '🗑'); dl.type = 'button'; dl.title = 'Выбросить блокнот';
       dl.addEventListener('click', async () => {
         const has = bk.pages.some((p) => p.ti || (p.tx || '').trim() || (p.html || '').replace(/<[^>]+>/g, '').trim());
@@ -698,5 +719,5 @@ var EkNotes = (function () {
     requestAnimationFrame(applyV);
     return { refresh, view, hint, fit: fitAll };
   }
-  return { W0, H0, PAPER, THR, COVER, uid, clone, fixBoard, diff, apply, mountBook, mountBoard, normShelf, shelfT, clean };
+  return { W0, H0, PAPER, THR, COVER, uid, clone, fixBoard, diff, apply, mountBook, mountBoard, normShelf, shelfT, shelfSig, mergeShelf, clean };
 })();

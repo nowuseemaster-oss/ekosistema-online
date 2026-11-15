@@ -1023,9 +1023,10 @@
     try {
       const { data, error } = await sb.from('notes').select('*');
       if (error) throw error;
-      const rows = {}; (data || []).forEach((r) => { rows[r.id] = r; });
+      const rows = {}; (data || []).forEach((r) => { rows[r.id] = r; if (r.updated_at) seenN[r.id] = r.updated_at; });
       const bk = rows['book:' + me] && rows['book:' + me].data;
       NT.book = bk && (Array.isArray(bk.books) || Array.isArray(bk.pages)) ? shelfOf(bk) : blankBook();
+      NT.mySig = EkNotes.shelfSig(NT.book);
       const doc = EkNotes.fixBoard(rows.board ? rows.board.data : {});
       // несохранённый черновик доски переживает перезагрузку страницы
       const dr = store.get('ek_board_draft', null);
@@ -1033,24 +1034,47 @@
       else { NT.base = EkNotes.clone(doc); NT.cur = EkNotes.clone(doc); }
       NT.st = 'on';
       if (!NT.ch) NT.ch = sb.channel('notes').on('postgres_changes', { event: '*', schema: 'public', table: 'notes' }, (p) => ntRow(p.new)).subscribe();
+      if (!NT.poll) NT.poll = setInterval(ntPoll, 30000);
     } catch (e) {
       NT.st = NOTAB(e) ? 'nosql' : 'err'; NT.err = e.message || String(e);
       NT.book = shelfOf(store.get('ek_book_local', null) || {});    // пока облако не готово — блокноты хранятся на этом устройстве
     }
     ntPaint();
   }
+  // ---------- блокнот: надёжная связь с облаком ----------
+  //  · большое изменение (много рисунков) живые обновления присылают без содержимого — тогда забираем строку сами;
+  //  · раз в 30 секунд сверяемся с облаком: если живое обновление потерялось, всё равно подтянемся;
+  //  · пока здесь пишут, чужая версия ждёт и потом сливается постранично — ничего не затирается.
+  const seenN = {};
+  let ntPend = null;
+  async function ntFetch(id) { try { const { data } = await sb.from('notes').select('*').eq('id', id).maybeSingle(); if (data && data.data) ntRow(data); } catch (e) {} }
+  async function ntPoll() {
+    if (NT.st !== 'on' || document.hidden || !sb) return;
+    try { const { data } = await sb.from('notes').select('id, updated_at'); (data || []).forEach((r) => { if ((r.id === 'board' || r.id === 'book:' + myHero()) && r.updated_at && r.updated_at !== seenN[r.id]) ntFetch(r.id); }); } catch (e) {}
+  }
+  const ntTyping = () => { const a = document.activeElement; return !!(NT.tab === 'book' && NT.el && a && NT.el.contains(a) && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))); };   // именно печатают, а не просто нажали кнопку
+  function ntTakeBook(d) {
+    const dirty = !!bookT || EkNotes.shelfSig(NT.book) !== NT.mySig;   // есть свои правки, ещё не ушедшие в облако
+    NT.book = dirty ? EkNotes.mergeShelf(NT.book, d) : shelfOf(d);
+    NT.mySig = EkNotes.shelfSig(EkNotes.normShelf(EkNotes.clone(d)));
+    if (dirty) bookChanged();
+    if (NT.tab === 'book') ntRemountBook();
+  }
+  setInterval(() => { if (ntPend && !ntTyping()) { const d = ntPend; ntPend = null; ntTakeBook(d); } }, 1000);
   function ntRow(row) {
     if (!row || !row.id) return;
     const me = myHero();
+    if ((row.id === 'board' || row.id === 'book:' + me) && (!row.data || typeof row.data !== 'object')) { ntFetch(row.id); return; }
+    if (row.updated_at) seenN[row.id] = row.updated_at;
     if (row.id === 'board') {
       const doc = EkNotes.fixBoard(row.data || {});
       const ops = NT.base && NT.cur ? EkNotes.diff(NT.base, NT.cur) : { n: 0 };
       NT.base = EkNotes.clone(doc); NT.cur = ops.n ? EkNotes.apply(doc, ops) : EkNotes.clone(doc);
       if (NT.ctl && NT.tab === 'board') { NT.ctl.refresh(); ntSave(); }
     } else if (row.id === 'book:' + me && row.data && (Array.isArray(row.data.books) || Array.isArray(row.data.pages))) {
-      if (Date.now() - NT.bookT < 4000) return;   // своё же эхо
-      NT.book = shelfOf(row.data);
-      if (NT.tab === 'book') ntRemountBook();
+      if (EkNotes.shelfSig(EkNotes.normShelf(EkNotes.clone(row.data))) === NT.mySig) return;   // своё же эхо или уже есть
+      if (ntTyping()) { ntPend = row.data; return; }
+      ntTakeBook(row.data);
     }
   }
   let bookT = 0;
@@ -1058,9 +1082,23 @@
     store.set('ek_book_cur', NT.book.cur);
     if (NT.st !== 'on') { store.set('ek_book_local', NT.book); return; }
     clearTimeout(bookT); bookT = setTimeout(async () => {
+      bookT = 0;
+      if (ntPend) return;   // пришла чужая версия и ждёт, пока здесь допишут: сольётся и уйдёт вместе
+      const id = 'book:' + myHero();
+      // в облаке есть то, чего здесь ещё нет (например, писал Мастер) — сливаем, а не затираем
+      try {
+        const { data: cr } = await sb.from('notes').select('data, updated_at').eq('id', id).maybeSingle();
+        if (cr && cr.data && cr.updated_at && cr.updated_at !== seenN[id] && EkNotes.shelfSig(EkNotes.normShelf(EkNotes.clone(cr.data))) !== NT.mySig) {
+          seenN[id] = cr.updated_at;
+          if (ntTyping()) ntPend = cr.data; else ntTakeBook(cr.data);   // сольётся и уйдёт следующим заходом
+          return;
+        }
+      } catch (e) {}
+      const sig = EkNotes.shelfSig(NT.book);
+      if (sig === NT.mySig) return;   // только листали — облаку сообщать нечего
       NT.bookT = Date.now();
-      const r = await sb.from('notes').upsert({ id: 'book:' + myHero(), data: { books: NT.book.books, cur: NT.book.cur }, updated_at: new Date().toISOString() });
-      if (r.error) note('Блокнот не сохранился: ' + r.error.message, 'bad');
+      const r = await sb.from('notes').upsert({ id, data: { books: NT.book.books, cur: NT.book.cur }, updated_at: new Date().toISOString() });
+      if (r.error) note('Блокнот не сохранился: ' + r.error.message, 'bad'); else NT.mySig = sig;
     }, 1200);
   }
   async function boardSave() {
@@ -1087,7 +1125,7 @@
     ['keydown', 'keyup'].forEach((ev) => NT.el.addEventListener(ev, (e) => e.stopPropagation()));
     ntPaint(); return NT.el;
   }
-  function ntRemountBook() { if (NT.tab !== 'book' || !NT.el) return false; if (document.activeElement && NT.el.contains(document.activeElement)) return false; ntPaint(); return true; }
+  function ntRemountBook() { if (NT.tab !== 'book' || !NT.el) return false; if (ntTyping()) return false; ntPaint(); return true; }
   function ntPaint() {
     const B = NT.el; if (!B) return; B.innerHTML = ''; NT.ctl = null;
     const tb = mkEl('div', 'nt-tabs');
